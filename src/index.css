@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 210 60% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 210 60% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 60% 8%;
+
+    --primary: 210 100% 12%;
+    --primary-foreground: 0 0% 100%;
+    
+    --primary-dark: 210 100% 8%;
+    --primary-light: 210 100% 20%;
+    
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 210 60% 8%;
+
+    --muted: 210 30% 96%;
+    --muted-foreground: 210 15% 45%;
+
+    --accent: 210 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 20% 88%;
+    --input: 210 20% 88%;
+    --ring: 210 100% 50%;
+
+    --radius: 0.75rem;
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(210 100% 12%), hsl(210 100% 20%));
+    --gradient-accent: linear-gradient(135deg, hsl(210 100% 50%), hsl(200 100% 60%));
+    
+    /* Shadows */
+    --shadow-soft: 0 2px 8px hsl(210 100% 12% / 0.08);
+    --shadow-medium: 0 4px 16px hsl(210 100% 12% / 0.12);
+    --shadow-strong: 0 8px 32px hsl(210 100% 12% / 0.16);
+    
+    /* Category Colors - Viral Finder (Red/Orange) */
+    --viral-primary: 0 84% 60%;
+    --viral-secondary: 24 95% 53%;
+    --viral-accent: 38 92% 50%;
+    
+    /* Category Colors - Sub-Niche Hunter (Blue) */
+    --subniche-primary: 217 91% 60%;
+    --subniche-secondary: 199 89% 48%;
+    --subniche-accent: 186 100% 42%;
+    
+    /* Category Colors - Criação de Conteúdo (Purple/Violet) */
+    --content-primary: 271 91% 65%;
+    --content-secondary: 258 90% 66%;
+    --content-accent: 243 75% 59%;
+    
+    /* Category Colors - Mídia e Imagem (Green/Emerald) */
+    --media-primary: 142 76% 36%;
+    --media-secondary: 160 84% 39%;
+    --media-accent: 172 66% 50%;
+    
+    /* Category Colors - Otimização e Gestão (Yellow/Gold) */
+    --optimize-primary: 48 96% 53%;
+    --optimize-secondary: 43 96% 56%;
+    --optimize-accent: 32 95% 44%;
+  }
+
+  .dark {
+    --background: 210 60% 8%;
+    --foreground: 0 0% 98%;
+
+    --card: 210 50% 10%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 210 50% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 210 60% 8%;
+    
+    --primary-dark: 210 100% 8%;
+    --primary-light: 210 100% 20%;
+
+    --secondary: 210 40% 15%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 210 30% 15%;
+    --muted-foreground: 210 15% 60%;
+
+    --accent: 210 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 210 30% 18%;
+    --input: 210 30% 18%;
+    --ring: 210 100% 50%;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(210 50% 10%), hsl(210 60% 15%));
+    --gradient-accent: linear-gradient(135deg, hsl(210 100% 50%), hsl(200 100% 60%));
+    --shadow-soft: 0 2px 8px hsl(0 0% 0% / 0.3);
+    --shadow-medium: 0 4px 16px hsl(0 0% 0% / 0.4);
+    --shadow-strong: 0 8px 32px hsl(0 0% 0% / 0.5);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
