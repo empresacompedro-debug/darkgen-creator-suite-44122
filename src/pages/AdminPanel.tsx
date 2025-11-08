@@ -256,6 +256,13 @@ export default function AdminPanel() {
         <div className="flex gap-2 items-center">
           <Button
             variant="outline"
+            onClick={() => navigate('/admin/pagamentos')}
+          >
+            <DollarSign className="h-4 w-4 mr-2" />
+            Configurar PIX
+          </Button>
+          <Button
+            variant="outline"
             onClick={() => navigate('/admin/audit-logs')}
           >
             <Activity className="h-4 w-4 mr-2" />

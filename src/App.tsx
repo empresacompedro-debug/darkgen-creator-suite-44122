@@ -30,6 +30,7 @@ import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import AdminPanel from "./pages/AdminPanel";
 import AuditLogs from "./pages/AuditLogs";
+import PaymentSettings from "./pages/PaymentSettings";
 
 const queryClient = new QueryClient();
 
@@ -142,6 +143,11 @@ const App = () => {
                 <Route path="/admin" element={
                   <ProtectedRoute>
                     <AdminPanel />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/pagamentos" element={
+                  <ProtectedRoute>
+                    <PaymentSettings />
                   </ProtectedRoute>
                 } />
                 <Route path="/admin/audit-logs" element={

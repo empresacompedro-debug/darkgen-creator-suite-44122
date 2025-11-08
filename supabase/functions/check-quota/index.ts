@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,7 +25,44 @@ serve(async (req) => {
     const { feature } = await req.json();
     
     const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY');
+    
+    // Create Supabase client to check admin status
+    const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
+    
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+    
+    if (userError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Check if user is admin (admins have unlimited quota)
+    const { data: adminRole } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('role', 'admin')
+      .maybeSingle();
+
+    if (adminRole) {
+      console.log('✅ Admin user detected, granting unlimited quota');
+      return new Response(JSON.stringify({
+        quotaUsed: 0,
+        dailyQuota: 999999,
+        lastReset: new Date().toISOString().split('T')[0],
+        percentageUsed: 0,
+        apiStatus: 'active',
+        isAdmin: true,
+        message: 'Admin tem quota ilimitada'
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     
     // Calcular início do dia (meia-noite PST)
     const now = new Date();
