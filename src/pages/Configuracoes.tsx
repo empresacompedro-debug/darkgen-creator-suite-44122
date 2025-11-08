@@ -4,13 +4,14 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Cookie } from "lucide-react";
+import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Cookie, Shield } from "lucide-react";
 import { CookieHelpDialog } from "@/components/CookieHelpDialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
+import { useSetupAdmin } from "@/hooks/useSetupAdmin";
 
 interface ApiKey {
   id: string;
@@ -32,11 +33,32 @@ const Configuracoes = () => {
   const [whiskCookie, setWhiskCookie] = useState('');
   const [imagefxCookie, setImagefxCookie] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [hasAdminRole, setHasAdminRole] = useState(false);
+  const { setupAdmin, isLoading: isSettingUpAdmin } = useSetupAdmin();
 
   useEffect(() => {
     loadUserData();
     loadCookies();
+    checkAdminRole();
   }, []);
+
+  const checkAdminRole = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: roles } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('role', 'admin')
+        .single();
+
+      setHasAdminRole(!!roles);
+    } catch (error) {
+      console.error('Error checking admin role:', error);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -415,6 +437,37 @@ const Configuracoes = () => {
           Configure múltiplas API Keys. Quando uma esgotar, o sistema automaticamente usa a próxima.
         </p>
       </div>
+
+      {user?.email === 'andreanselmolima@gmail.com' && !hasAdminRole && (
+        <Card className="p-6 bg-primary/5 border-primary">
+          <div className="flex items-start gap-4">
+            <Shield className="h-8 w-8 text-primary mt-1" />
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold mb-2">🔐 Configurar Permissões de Admin</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Você é o usuário master. Clique no botão abaixo para ativar suas permissões de administrador.
+              </p>
+              <Button 
+                onClick={setupAdmin} 
+                disabled={isSettingUpAdmin}
+                className="w-full sm:w-auto"
+              >
+                {isSettingUpAdmin ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Configurando...
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-4 w-4 mr-2" />
+                    Ativar Permissões de Admin
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {renderKeySection("YouTube API Keys", "youtube", youtubeKeys)}
       {renderKeySection("Gemini API Keys", "gemini", geminiKeys)}

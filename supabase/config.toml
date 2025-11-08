@@ -1,1 +1,4 @@
 project_id = "fmtikdkgfmumbqjndbss"
+
+[functions.setup-first-admin]
+verify_jwt = true
