@@ -128,14 +128,15 @@ serve(async (req) => {
     
     console.log(`🎯 Modelo recebido: "${aiModel}"`);
     
-    // Validação: força modelos válidos (Claude, Gemini e GPT)
+    // Validação: força modelos válidos (Claude, Gemini, GPT e Kimi)
     const validModels = [
       'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-sonnet-3.7', 
       'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
       'gpt-5-2025-08-07', 'gpt-5-mini-2025-08-07', 'gpt-5-nano-2025-08-07',
       'gpt-4.1-2025-04-14', 'gpt-4.1-mini-2025-04-14',
       'o3-2025-04-16', 'o4-mini-2025-04-16',
-      'gpt-4o', 'gpt-4o-mini'
+      'gpt-4o', 'gpt-4o-mini',
+      'kimi-k2-thinking'
     ];
     if (!validModels.includes(aiModel)) {
       console.warn(`⚠️ Modelo inválido recebido: ${aiModel}. Usando padrão: claude-sonnet-4.5`);
@@ -195,8 +196,8 @@ serve(async (req) => {
         return 600;
       }
       
-      // GPT-4.1, GPT-4o: 128K tokens = ~450 vídeos
-      if (model.includes('gpt-4')) {
+      // GPT-4.1, GPT-4o, Kimi K2: 128K tokens = ~450 vídeos
+      if (model.includes('gpt-4') || model.includes('kimi')) {
         return 450;
       }
       
@@ -394,7 +395,7 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
 - JSON compacto e válido`;
 
     let resultText: string = '';
-    let provider: 'claude' | 'openai' | 'gemini' = 'claude';
+    let provider: 'claude' | 'openai' | 'gemini' | 'kimi' = 'claude';
 
     // 1. CLAUDE (API Key do Usuário)
     if (aiModel.startsWith('claude')) {
@@ -681,6 +682,65 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       }
       
       console.log('✅ Resposta da OpenAI recebida:', resultText.slice(0, 200));
+
+    // 4. Kimi K2 (API Key do Usuário)
+    } else if (aiModel.startsWith('kimi')) {
+      provider = 'kimi';
+      console.log('🔍 Usando API Key do Kimi do usuário');
+      
+      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+      if (!apiKeyResult) {
+        throw new Error('❌ API Key do Kimi não configurada. Configure em Configurações → API Keys.');
+      }
+
+      const apiKey = apiKeyResult.key;
+      console.log(`✅ Usando chave do usuário para Kimi`);
+
+      // Kimi usa endpoint compatível com OpenAI
+      const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'moonshot-v1-128k',
+          max_tokens: 16000,
+          messages: [{ role: 'user', content: prompt }]
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Erro Kimi API:', errorText);
+        
+        if (response.status === 401) {
+          throw new Error('❌ API Key do Kimi inválida. Verifique sua chave em Configurações.');
+        }
+        if (response.status === 429) {
+          throw new Error('❌ Limite de uso da API do Kimi excedido.');
+        }
+        throw new Error(`Kimi API Error: ${response.status} - ${errorText.slice(0, 200)}`);
+      }
+
+      const data = await response.json();
+      
+      // VALIDAÇÃO: Verificar se há erro retornado
+      if (data.error) {
+        console.error('❌ Erro reportado pelo Kimi:', JSON.stringify(data.error));
+        throw new Error(`Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`);
+      }
+
+      resultText = data.choices[0].message.content;
+      
+      // VALIDAÇÃO: Verificar se o conteúdo não está vazio
+      if (!resultText || resultText.trim().length === 0) {
+        console.error('❌ Resposta do Kimi está vazia');
+        console.error('📦 Dados completos:', JSON.stringify(data));
+        throw new Error('A API do Kimi retornou uma resposta vazia. Tente novamente ou use outro modelo.');
+      }
+      
+      console.log('✅ Resposta do Kimi recebida:', resultText.slice(0, 200));
 
     } else {
       throw new Error(`❌ Modelo de IA não suportado: ${aiModel}`);

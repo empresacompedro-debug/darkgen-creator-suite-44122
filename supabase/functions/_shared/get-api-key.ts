@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 export async function getApiKey(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
   supabaseClient: any
 ): Promise<{ key: string; keyId: string } | null> {
   
@@ -52,7 +52,8 @@ export async function getApiKey(
     youtube: Deno.env.get('YOUTUBE_API_KEY'),
     gemini: Deno.env.get('GEMINI_API_KEY'),
     claude: Deno.env.get('ANTHROPIC_API_KEY'),
-    openai: Deno.env.get('OPENAI_API_KEY')
+    openai: Deno.env.get('OPENAI_API_KEY'),
+    kimi: Deno.env.get('KIMI_API_KEY')
   };
   
   const globalKey = globalKeys[provider];
@@ -189,7 +190,7 @@ export async function markApiKeyAsExceeded(
 // Helper universal para executar requisições com rotação automática de API keys
 export async function executeWithKeyRotation<T>(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
   supabaseClient: any,
   executeRequest: (apiKey: string) => Promise<T>,
   maxRetries: number = 3

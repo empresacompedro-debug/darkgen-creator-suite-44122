@@ -30,6 +30,7 @@ const Configuracoes = () => {
   const [claudeKeys, setClaudeKeys] = useState<ApiKey[]>([]);
   const [openaiKeys, setOpenaiKeys] = useState<ApiKey[]>([]);
   const [huggingfaceKeys, setHuggingfaceKeys] = useState<ApiKey[]>([]);
+  const [kimiKeys, setKimiKeys] = useState<ApiKey[]>([]);
   const [whiskCookie, setWhiskCookie] = useState('');
   const [imagefxCookie, setImagefxCookie] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -89,7 +90,8 @@ const Configuracoes = () => {
         gemini: [] as ApiKey[],
         claude: [] as ApiKey[],
         openai: [] as ApiKey[],
-        huggingface: [] as ApiKey[]
+        huggingface: [] as ApiKey[],
+        kimi: [] as ApiKey[]
       };
 
       data?.forEach((key: any) => {
@@ -112,6 +114,7 @@ const Configuracoes = () => {
       setClaudeKeys(groupedKeys.claude);
       setOpenaiKeys(groupedKeys.openai);
       setHuggingfaceKeys(groupedKeys.huggingface);
+      setKimiKeys(groupedKeys.kimi);
     } catch (error: any) {
       console.error('Error loading API keys:', error);
     }
@@ -216,6 +219,7 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys([...claudeKeys, newKey]); break;
       case 'openai': setOpenaiKeys([...openaiKeys, newKey]); break;
       case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, newKey]); break;
+      case 'kimi': setKimiKeys([...kimiKeys, newKey]); break;
     }
   };
 
@@ -234,6 +238,7 @@ const Configuracoes = () => {
         case 'claude': setClaudeKeys(claudeKeys.filter(k => k.id !== id)); break;
         case 'openai': setOpenaiKeys(openaiKeys.filter(k => k.id !== id)); break;
         case 'huggingface': setHuggingfaceKeys(huggingfaceKeys.filter(k => k.id !== id)); break;
+        case 'kimi': setKimiKeys(kimiKeys.filter(k => k.id !== id)); break;
       }
     }
   };
@@ -247,6 +252,7 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys(updater(claudeKeys)); break;
       case 'openai': setOpenaiKeys(updater(openaiKeys)); break;
       case 'huggingface': setHuggingfaceKeys(updater(huggingfaceKeys)); break;
+      case 'kimi': setKimiKeys(updater(kimiKeys)); break;
     }
   };
 
@@ -473,6 +479,7 @@ const Configuracoes = () => {
       {renderKeySection("Gemini API Keys", "gemini", geminiKeys)}
       {renderKeySection("Claude API Keys", "claude", claudeKeys)}
       {renderKeySection("OpenAI API Keys", "openai", openaiKeys)}
+      {renderKeySection("Kimi (Moonshot AI) API Keys", "kimi", kimiKeys)}
       
       <Card className="p-6 bg-primary/5 border-primary/20">
         <div className="space-y-4">
