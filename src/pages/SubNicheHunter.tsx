@@ -473,7 +473,7 @@ const SubNicheHunter = () => {
       const cleaned = line
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
+        .replace(/[^a-zA-Z0-9\s,]/g, ' ') // Remove caracteres especiais, MAS preserva vírgulas
         .replace(/\s+/g, ' ')             // Normaliza espaços
         .trim();
       
@@ -497,7 +497,7 @@ const SubNicheHunter = () => {
 
   // Detecta caracteres especiais (exceto letras, números, espaços e quebras)
   const hasSpecialCharacters = (text: string): boolean => {
-    return /[^a-zA-Z0-9\s\n\r]/.test(text);
+    return /[^a-zA-Z0-9\s\n\r,]/.test(text); // Permite vírgulas
   };
 
   // Retorna mensagem de aviso se houver caracteres especiais
@@ -505,7 +505,7 @@ const SubNicheHunter = () => {
     if (!text.trim()) return null;
     
     if (hasSpecialCharacters(text)) {
-      const matches = text.match(/[^a-zA-Z0-9\s\n\r]/g) || [];
+      const matches = text.match(/[^a-zA-Z0-9\s\n\r,]/g) || []; // Permite vírgulas
       const uniqueChars = [...new Set(matches)].slice(0, 15).join(', ');
       return `Caracteres especiais encontrados: ${uniqueChars}`;
     }
