@@ -7,22 +7,7 @@ const corsHeaders = {
 };
 
 interface AnalysisResult {
-  topKeywords: Array<{
-    keyword: string;
-    frequency: number;
-    avgViews: number;
-    avgVPH: number;
-    examples: string[];
-  }>;
-  championMicroNiches: Array<{
-    niche: string;
-    avgViews: number;
-    avgVPH: number;
-    videoCount: number;
-    bestTitles: string[];
-    pattern: string;
-  }>;
-  insights: string;
+  markdownReport: string;
 }
 
 serve(async (req) => {
@@ -89,44 +74,93 @@ serve(async (req) => {
       throw new Error(`Modelo não suportado: ${aiModel}`);
     }
 
-    // Build optimized prompt
-    const prompt = `Analise os dados de vídeos do YouTube abaixo e retorne um JSON estruturado.
+    // Build comprehensive markdown prompt
+    const prompt = `CONTEXTO:
+Você é um especialista em análise de performance de conteúdo no YouTube, especializado em identificar padrões virais em títulos de vídeos de qualquer nicho/subnicho e microsubnicho.
 
-DADOS DO YOUTUBE:
+TAREFA:
+Analise os títulos fornecidos e crie uma resposta seguindo RIGOROSAMENTE este modelo:
+
+# 🏆 **TEMA CAMPEÃO ABSOLUTO**
+[Identificar o tema principal de maior sucesso combinando 3 elementos: CONTEXTO + CONFLITO + RESULTADO]
+
+## **🔑 TOP 10 PALAVRAS-CHAVE MAIS REPETIDAS**
+1. **"[Palavra/Frase]"** - [Nº vezes]x (média [X]K views)
+2. **"[Palavra/Frase]"** - [Nº vezes]x (média [X]K views)
+[Continue até 10...]
+
+## **📊 5 SUBNICHOS CAMPEÕES**
+1. **[Nome do Subnicho]** - Média [X]K views
+2. **[Nome do Subnicho]** - Média [X]K views
+[Continue até 5...]
+
+## **🎯 10 MICRONICHOS CAMPEÕES**
+1. **"[Descrição Específica do Micronicho]"** - [X]K média
+2. **"[Descrição Específica do Micronicho]"** - [X]K média
+[Continue até 10...]
+
+## **✨ 50 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**
+
+### **BASEADOS NO CAMPEÃO 1 ([X]K views):**
+**"[Título original completo]"**
+1. [Nova variação mantendo estrutura mas mudando detalhes]
+2. [Nova variação mantendo estrutura mas mudando detalhes]
+[Continue até 10...]
+
+### **BASEADOS NO CAMPEÃO 2 ([X]K views):**
+**"[Título original completo]"**
+11. [Nova variação mantendo estrutura mas mudando detalhes]
+12. [Nova variação mantendo estrutura mas mudando detalhes]
+[Continue até 20...]
+
+[Repetir para Campeões 3, 4 e 5 até completar 50 títulos]
+
+## 💡 **8 ELEMENTOS-CHAVE PARA REPLICAR**
+1. **[Elemento]** (sempre incluir exemplo)
+2. **[Elemento]** (sempre incluir exemplo)
+[Continue até 8...]
+
+## 🚀 **MICRONICHOS PARA REPLICAR**
+
+### **PRIORIDADE 1 (FAZER IMEDIATAMENTE):**
+- [Micronicho 1 com descrição]
+- [Micronicho 2 com descrição]
+- [Micronicho 3 com descrição]
+
+### **PRIORIDADE 2 (ALTA PERFORMANCE):**
+- [Micronicho 4 com descrição]
+- [Micronicho 5 com descrição]
+- [Micronicho 6 com descrição]
+
+### **PRIORIDADE 3 (BOA PERFORMANCE):**
+- [Micronicho 7 com descrição]
+- [Micronicho 8 com descrição]
+- [Micronicho 9 com descrição]
+
+## ⭐ **10 TÍTULOS FINAIS COM MAIOR POTENCIAL**
+
+**1. MICRONICHO: [Nome do Micronicho] [Potencial: XXK+ views]**
+\`\`\`
+[Título completo de 15-20 palavras seguindo a fórmula identificada]
+\`\`\`
+
+**2. MICRONICHO: [Nome do Micronicho] [Potencial: XXK+ views]**
+\`\`\`
+[Título completo de 15-20 palavras seguindo a fórmula identificada]
+\`\`\`
+
+[Repetir para 10 títulos]
+
+=== DADOS DE ENTRADA ===
 ${rawData}
 
-INSTRUÇÕES IMPORTANTES:
-1. Os dados estão em formato brasileiro (ex: "3,2 mil visualizações", "15,8 mil", "VPH")
-2. Extraia TODOS os vídeos encontrados
-3. Identifique padrões nos títulos de melhor performance
-4. Detecte micro-nichos campeões (grupos de vídeos com tema similar e boas métricas)
-5. Encontre palavras-chave mais frequentes e efetivas
-
-FORMATO DE RESPOSTA (JSON):
-{
-  "topKeywords": [
-    {
-      "keyword": "palavra ou frase",
-      "frequency": número_de_ocorrências,
-      "avgViews": média_de_views,
-      "avgVPH": média_de_VPH,
-      "examples": ["título 1", "título 2"]
-    }
-  ],
-  "championMicroNiches": [
-    {
-      "niche": "nome do micro-nicho",
-      "avgViews": média_de_views,
-      "avgVPH": média_de_VPH,
-      "videoCount": quantidade_de_vídeos,
-      "bestTitles": ["melhor título 1", "melhor título 2"],
-      "pattern": "padrão identificado nos títulos"
-    }
-  ],
-  "insights": "texto com insights gerais sobre a análise"
-}
-
-RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
+IMPORTANTE: 
+- NÃO adicione seções extras
+- NÃO mude a ordem das seções
+- MANTENHA exatamente a formatação mostrada
+- USE os mesmos emojis indicados
+- SEMPRE baseie as variações nos 5 campeões identificados
+- Retorne APENAS o markdown formatado, sem explicações adicionais`;
 
     console.log('Sending request to AI model...');
 
@@ -143,7 +177,7 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
         },
         body: JSON.stringify({
           model: aiModel,
-          max_tokens: 4096,
+          max_tokens: 8192,
           messages: [
             {
               role: 'user',
@@ -162,14 +196,8 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
       const data = await response.json();
       console.log('Claude response received');
       
-      const content = data.content[0].text;
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      
-      if (!jsonMatch) {
-        throw new Error('Resposta da IA não contém JSON válido');
-      }
-      
-      analysis = JSON.parse(jsonMatch[0]);
+      const markdownReport = data.content[0].text;
+      analysis = { markdownReport };
       
     } else if (aiModel.includes('gemini')) {
       const response = await fetch(apiUrl, {
@@ -185,7 +213,7 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 4096,
+            maxOutputTokens: 8192,
           },
         }),
       });
@@ -199,14 +227,8 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
       const data = await response.json();
       console.log('Gemini response received');
       
-      const content = data.candidates[0].content.parts[0].text;
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      
-      if (!jsonMatch) {
-        throw new Error('Resposta da IA não contém JSON válido');
-      }
-      
-      analysis = JSON.parse(jsonMatch[0]);
+      const markdownReport = data.candidates[0].content.parts[0].text;
+      analysis = { markdownReport };
       
     } else if (aiModel.includes('gpt')) {
       const response = await fetch(apiUrl, {
@@ -228,7 +250,7 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
             },
           ],
           temperature: 0.7,
-          max_tokens: 4096,
+          max_tokens: 8192,
         }),
       });
 
@@ -241,14 +263,8 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
       const data = await response.json();
       console.log('OpenAI response received');
       
-      const content = data.choices[0].message.content;
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      
-      if (!jsonMatch) {
-        throw new Error('Resposta da IA não contém JSON válido');
-      }
-      
-      analysis = JSON.parse(jsonMatch[0]);
+      const markdownReport = data.choices[0].message.content;
+      analysis = { markdownReport };
     } else {
       throw new Error('Modelo não suportado');
     }
@@ -265,9 +281,7 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
           user_id: userId,
           raw_data: rawData,
           ai_model: aiModel,
-          top_keywords: analysis.topKeywords,
-          champion_micro_niches: analysis.championMicroNiches,
-          insights: analysis.insights,
+          analysis_result: analysis,
         });
 
       if (insertError) {
@@ -288,10 +302,13 @@ RETORNE APENAS O JSON, SEM MARKDOWN OU EXPLICAÇÕES ADICIONAIS.`;
   } catch (error) {
     console.error('Error in analyze-titles function:', error);
     
+    const errorMessage = error instanceof Error ? error.message : 'Erro ao processar análise';
+    const errorDetails = error instanceof Error ? error.toString() : String(error);
+    
     return new Response(
       JSON.stringify({
-        error: error.message || 'Erro ao processar análise',
-        details: error.toString(),
+        error: errorMessage,
+        details: errorDetails,
       }),
       {
         status: 500,
