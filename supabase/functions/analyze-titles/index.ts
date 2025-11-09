@@ -258,10 +258,54 @@ IMPORTANTE:
         const finishReason = (candidate as any)?.finishReason ?? data?.promptFeedback?.blockReason ?? 'unknown';
         const safety = (candidate as any)?.safetyRatings ?? data?.promptFeedback?.safetyRatings;
         console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
-        throw new Error('Gemini não retornou texto (possível bloqueio de segurança). Tente ajustar o prompt ou reduzir os dados.');
+
+        // Retry with a compact prompt using the SAME model (no fallback)
+        try {
+          const compactHeader = `MODO COMPACTO:\n- Mantenha as MESMAS seções e a mesma ordem\n- Limite para: 20 títulos no total (4 por campeão) e 5 títulos finais\n- Seja objetivo e direto\n`;
+          const compactPrompt = compactHeader +
+            prompt
+              .replace('## **✨ 50 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**', '## **✨ 20 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**')
+              .replace('Repetir para Campeões 3, 4 e 5 até completar 50 títulos', 'Repetir para Campeões 3, 4 e 5 até completar 20 títulos')
+              .replace('## ⭐ **10 TÍTULOS FINAIS COM MAIOR POTENCIAL**', '## ⭐ **5 TÍTULOS FINAIS COM MAIOR POTENCIAL**');
+
+          console.log('Retrying Gemini with compact prompt');
+          const retryResp = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: compactPrompt }] }],
+              generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+            }),
+          });
+
+          if (retryResp.ok) {
+            const rdata = await retryResp.json();
+            const rcand = rdata?.candidates?.[0];
+            let rmd = '';
+            const rparts = rcand?.content?.parts;
+            if (Array.isArray(rparts) && rparts.length > 0) {
+              rmd = rparts.map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? ''))).join('');
+            } else if (typeof (rcand as any)?.text === 'string') {
+              rmd = (rcand as any).text;
+            }
+            if (!rmd && typeof (rdata as any).text === 'string') rmd = (rdata as any).text;
+            if (rmd && rmd.trim()) {
+              analysis = { markdownReport: rmd };
+              console.log('Gemini compact retry succeeded');
+            }
+          } else {
+            console.error('Gemini compact retry error:', await retryResp.text());
+          }
+        } catch (retryErr) {
+          console.error('Compact retry failed:', retryErr);
+        }
+
+        if (!analysis.markdownReport) {
+          throw new Error('Gemini não retornou texto (possível bloqueio de segurança ou limite). Tente reduzir os dados ou refazer a análise em partes.');
+        }
+      } else {
+        analysis = { markdownReport };
       }
-      
-      analysis = { markdownReport };
     } else if (aiModel.includes('gpt')) {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       
