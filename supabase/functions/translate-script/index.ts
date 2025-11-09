@@ -37,7 +37,26 @@ serve(async (req) => {
     const script = sanitizeString(body.script);
     const { targetLanguages, aiModel } = body;
 
-    console.log('🎯 [translate-script] Modelo selecionado:', aiModel);
+    // Detect provider keys
+    const hasAnthropic = !!Deno.env.get('ANTHROPIC_API_KEY');
+    const hasGemini = !!Deno.env.get('GEMINI_API_KEY');
+    const hasOpenAI = !!Deno.env.get('OPENAI_API_KEY');
+
+    // Choose effective model based on available API keys
+    let modelToUse: string = aiModel;
+    if (aiModel.startsWith('gpt') && !hasOpenAI) {
+      if (hasGemini) {
+        console.warn('⚠️ [translate-script] OPENAI_API_KEY ausente. Alternando automaticamente para gemini-2.5-flash');
+        modelToUse = 'gemini-2.5-flash';
+      } else if (hasAnthropic) {
+        console.warn('⚠️ [translate-script] OPENAI_API_KEY ausente. Alternando automaticamente para claude-sonnet-4-20250514');
+        modelToUse = 'claude-sonnet-4-20250514';
+      } else {
+        throw new Error('Nenhuma API key disponível para o modelo selecionado. Configure OpenAI/Gemini/Anthropic.');
+      }
+    }
+
+    console.log('🎯 [translate-script] Modelo selecionado:', aiModel, '| efetivo:', modelToUse);
     console.log('🌍 [translate-script] Idiomas alvo:', targetLanguages);
 
     const languageNames: Record<string, string> = {
@@ -77,7 +96,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
       let apiKey = '';
       let requestBody: any = {};
 
-      if (aiModel.startsWith('claude')) {
+      if (modelToUse.startsWith('claude')) {
         console.log(`🔑 [translate-script] Buscando API key ANTHROPIC_API_KEY para ${targetLang}`);
         apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
         
@@ -95,8 +114,8 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
           'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet-20250219',
           'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514'
         };
-        const finalModel = modelMap[aiModel] || 'claude-sonnet-4-20250514';
-        console.log(`🤖 [translate-script] Modelo mapeado: ${aiModel} → ${finalModel}`);
+        const finalModel = modelMap[modelToUse] || 'claude-sonnet-4-20250514';
+        console.log(`🤖 [translate-script] Modelo mapeado: ${modelToUse} → ${finalModel}`);
         const maxTokens = getMaxTokensForModel(finalModel);
         console.log(`📦 [translate-script] Usando ${maxTokens} max_tokens para ${finalModel} (${targetLang})`);
         
@@ -105,26 +124,26 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
           max_tokens: maxTokens,
           messages: [{ role: 'user', content: prompt }]
         };
-      } else if (aiModel.startsWith('gemini')) {
+      } else if (modelToUse.startsWith('gemini')) {
         apiKey = Deno.env.get('GEMINI_API_KEY') || '';
         const modelMap: Record<string, string> = {
           'gemini-2.5-pro': 'gemini-2.0-flash-exp',
           'gemini-2.5-flash': 'gemini-2.0-flash-exp',
           'gemini-2.5-flash-lite': 'gemini-1.5-flash'
         };
-        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`;
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[modelToUse] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`;
         requestBody = {
           contents: [{ parts: [{ text: prompt }] }]
         };
-      } else if (aiModel.startsWith('gpt')) {
+      } else if (modelToUse.startsWith('gpt')) {
         apiKey = Deno.env.get('OPENAI_API_KEY') || '';
         apiUrl = 'https://api.openai.com/v1/chat/completions';
-        const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
-        const maxTokens = getMaxTokensForModel(aiModel);
-        console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel} (${targetLang})`);
+        const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
+        const maxTokens = getMaxTokensForModel(modelToUse);
+        console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${modelToUse} (${targetLang})`);
         
         requestBody = {
-          model: aiModel,
+          model: modelToUse,
           messages: [{ role: 'user', content: prompt }],
           ...(isReasoningModel 
             ? { max_completion_tokens: maxTokens }
@@ -134,17 +153,17 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
       }
 
       if (!apiKey) {
-        throw new Error(`API key não configurada para ${aiModel}`);
+        throw new Error(`API key não configurada para ${modelToUse}`);
       }
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
 
-      if (aiModel.startsWith('claude')) {
+      if (modelToUse.startsWith('claude')) {
         headers['x-api-key'] = apiKey;
         headers['anthropic-version'] = '2023-06-01';
-      } else if (aiModel.startsWith('gpt')) {
+      } else if (modelToUse.startsWith('gpt')) {
         headers['Authorization'] = `Bearer ${apiKey}`;
       }
 
@@ -167,16 +186,16 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
 
       const data = await response.json();
 
-      if (aiModel.startsWith('claude')) {
+      if (modelToUse.startsWith('claude')) {
         translations[targetLang] = data.content[0].text;
-      } else if (aiModel.startsWith('gemini')) {
-        translations[targetLang] = data.candidates[0].content.parts[0].text;
-      } else if (aiModel.startsWith('gpt')) {
+      } else if (modelToUse.startsWith('gemini')) {
+        translations[targetLang] = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      } else if (modelToUse.startsWith('gpt')) {
         translations[targetLang] = data.choices[0].message.content;
       }
     }
 
-    return new Response(JSON.stringify({ translations }), {
+    return new Response(JSON.stringify({ translations, modelUsed: modelToUse }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
