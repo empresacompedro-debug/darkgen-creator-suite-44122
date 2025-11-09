@@ -14,7 +14,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
   const models = [
     // Modelos Claude
     { 
-      id: "claude-sonnet-4.5", 
+      id: "claude-sonnet-4-5", 
       name: "Claude Sonnet 4.5 (Recomendado)", 
       provider: "Anthropic",
       description: "Modelo mais avançado - Requer API key",
@@ -24,13 +24,22 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       maxVideos: 800
     },
     { 
-      id: "claude-sonnet-3.7", 
-      name: "Claude Sonnet 3.7", 
+      id: "claude-3-7-sonnet-20250219", 
+      name: "Claude 3.7 Sonnet", 
       provider: "Anthropic",
       description: "Extended thinking - Raciocínio profundo - Requer API key",
       requiresKey: true,
       icon: <Sparkles className="h-3 w-3" />,
       maxVideos: 600
+    },
+    { 
+      id: "claude-3-5-sonnet-20241022", 
+      name: "Claude 3.5 Sonnet", 
+      provider: "Anthropic",
+      description: "Rápido e inteligente - Requer API key",
+      requiresKey: true,
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 500
     },
     // Modelos Gemini
     { 

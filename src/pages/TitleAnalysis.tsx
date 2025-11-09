@@ -35,12 +35,22 @@ interface MicroNicheData {
 }
 
 interface AnalysisResult {
-  palavras_chave_campeas: {
-    ranking: KeywordData[];
-  };
-  micro_nichos_ranking: MicroNicheData[];
+  topKeywords: Array<{
+    keyword: string;
+    frequency: number;
+    avgViews: number;
+    avgVPH: number;
+    examples: string[];
+  }>;
+  championMicroNiches: Array<{
+    niche: string;
+    avgViews: number;
+    avgVPH: number;
+    videoCount: number;
+    bestTitles: string[];
+    pattern: string;
+  }>;
   insights: string;
-  videos_analyzed: number;
 }
 
 export default function TitleAnalysis() {
@@ -71,7 +81,7 @@ export default function TitleAnalysis() {
       setResult(data);
       toast({
         title: "✅ Análise concluída!",
-        description: `${data.videos_analyzed} vídeos analisados`
+        description: `Análise realizada com sucesso`
       });
     } catch (error: any) {
       console.error("Erro na análise:", error);
@@ -162,9 +172,6 @@ há 12 horas
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-foreground">🎯 Resultados</h2>
-            <Badge variant="secondary" className="text-lg px-4 py-2">
-              {result.videos_analyzed} vídeos analisados
-            </Badge>
           </div>
           
           {/* Palavras-chave */}
@@ -177,7 +184,7 @@ há 12 horas
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {result.palavras_chave_campeas?.ranking?.slice(0, 10).map((kw, i) => (
+                {result.topKeywords?.slice(0, 10).map((kw, i) => (
                   <div key={i} className="p-4 border rounded-lg hover:bg-accent/50 transition-colors">
                     <div className="flex justify-between items-start mb-3">
                       <div className="flex items-center gap-3">
@@ -188,15 +195,15 @@ há 12 horas
                       </div>
                       <div className="text-right text-sm">
                         <div className="flex gap-4">
-                          <Badge variant="outline">{kw.occurrences}x</Badge>
+                          <Badge variant="outline">{kw.frequency}x</Badge>
                           <Badge variant="secondary">{kw.avgViews?.toLocaleString()} views</Badge>
-                          <Badge variant="default">{kw.avgVph} VPH</Badge>
+                          <Badge variant="default">{kw.avgVPH} VPH</Badge>
                         </div>
                       </div>
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs font-semibold text-muted-foreground mb-2">Melhores Títulos:</p>
-                      {kw.bestTitles?.map((title, idx) => (
+                      {kw.examples?.map((title, idx) => (
                         <div key={idx} className="text-sm text-muted-foreground pl-3 border-l-2 border-primary/30">
                           • {title}
                         </div>
@@ -218,48 +225,35 @@ há 12 horas
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {result.micro_nichos_ranking?.filter(m => m.isChampion).map((micro) => (
-                  <div key={micro.rank} className="p-5 border-2 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10">
+                {result.championMicroNiches?.map((micro, idx) => (
+                  <div key={idx} className="p-5 border-2 rounded-lg bg-gradient-to-br from-primary/5 to-primary/10">
                     <div className="flex justify-between items-start mb-4">
                       <div className="flex items-start gap-4">
                         <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground text-2xl font-bold shadow-lg">
-                          #{micro.rank}
+                          #{idx + 1}
                         </span>
                         <div>
-                          <h4 className="font-bold text-xl mb-1">{micro.name}</h4>
-                          <p className="text-sm text-muted-foreground">{micro.description}</p>
+                          <h4 className="font-bold text-xl mb-1">{micro.niche}</h4>
+                          <p className="text-sm text-muted-foreground">{micro.pattern}</p>
                         </div>
                       </div>
                       <div className="text-right space-y-1">
-                        <div className="text-2xl font-bold text-primary">{micro.totalViews?.toLocaleString()}</div>
-                        <div className="text-xs text-muted-foreground">views totais</div>
+                        <div className="text-2xl font-bold text-primary">{micro.avgViews?.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground">views médias</div>
                         <div className="flex gap-2 justify-end mt-2">
                           <Badge variant="secondary">{micro.videoCount} vídeos</Badge>
-                          <Badge variant="default">{micro.avgViewsPerVideo?.toLocaleString()} views/vídeo</Badge>
+                          <Badge variant="default">{micro.avgVPH} VPH</Badge>
                         </div>
                       </div>
                     </div>
-                    
-                    {micro.titleStructure && (
-                      <div className="mt-3 p-3 bg-background rounded-lg border">
-                        <span className="text-xs font-semibold text-muted-foreground">Estrutura de Título:</span>
-                        <div className="text-sm mt-1 font-medium">{micro.titleStructure}</div>
-                      </div>
-                    )}
 
-                    {micro.videos && micro.videos.length > 0 && (
+                    {micro.bestTitles && micro.bestTitles.length > 0 && (
                       <div className="mt-4">
-                        <p className="text-xs font-semibold text-muted-foreground mb-2">Exemplos de Vídeos:</p>
+                        <p className="text-xs font-semibold text-muted-foreground mb-2">Melhores Títulos:</p>
                         <div className="space-y-2">
-                          {micro.videos.slice(0, 3).map((video, idx) => (
+                          {micro.bestTitles.slice(0, 3).map((title, idx) => (
                             <div key={idx} className="p-2 bg-background rounded border text-sm">
-                              <div className="flex justify-between items-start">
-                                <span className="flex-1">{video.title}</span>
-                                <div className="flex gap-2 ml-4">
-                                  <Badge variant="outline" className="text-xs">{video.views?.toLocaleString()} views</Badge>
-                                  <Badge variant="secondary" className="text-xs">{video.vph} VPH</Badge>
-                                </div>
-                              </div>
+                              <span className="flex-1">{title}</span>
                             </div>
                           ))}
                         </div>
