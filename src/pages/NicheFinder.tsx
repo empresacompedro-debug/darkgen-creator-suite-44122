@@ -911,37 +911,6 @@ const NicheFinder = () => {
 
                   <CollapsibleContent>
                     <div className="space-y-6 pt-4">
-                      {/* Presets Rápidos */}
-                      <div>
-                        <Label className="text-sm font-semibold mb-2 block">⚡ Presets Rápidos</Label>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => applyPreset('new')}
-                            className="bg-green-500/10 hover:bg-green-500/20 border-green-500/30"
-                          >
-                            🌱 Canais Novos (&lt;1 ano + &lt;10K subs)
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => applyPreset('growing')}
-                            className="bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30"
-                          >
-                            📈 Canais Crescendo (1-3 anos + 10K-100K)
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => applyPreset('established')}
-                            className="bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30"
-                          >
-                            🏆 Canais Estabelecidos (3+ anos + 100K+)
-                          </Button>
-                        </div>
-                      </div>
-
                       {/* Filtro de Idade do Canal */}
                       <div className="space-y-3">
                         <Label className="text-sm font-semibold">📅 Idade do Canal (em dias)</Label>
