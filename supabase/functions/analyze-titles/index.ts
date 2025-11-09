@@ -68,7 +68,7 @@ serve(async (req) => {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       
       if (!apiKey) {
-        throw new Error('OPENAI_API_KEY não configurada');
+        console.warn('OPENAI_API_KEY não configurada; aplicando fallback para Gemini/Claude se disponíveis.');
       }
     } else {
       throw new Error(`Modelo não suportado: ${aiModel}`);
@@ -257,40 +257,90 @@ IMPORTANTE:
       analysis = { markdownReport };
       
     } else if (aiModel.includes('gpt')) {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: aiModel,
-          messages: [
-            {
-              role: 'system',
-              content: 'Você é um especialista em análise de dados do YouTube. Retorne apenas JSON válido.',
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          temperature: 0.7,
-          max_tokens: 8192,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('OpenAI API error:', errorText);
-        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      if (!apiKey) {
+        console.warn('OPENAI_API_KEY ausente; tentando fallback para Gemini ou Claude.');
+        const geminiKey = Deno.env.get('GEMINI_API_KEY');
+        if (geminiKey) {
+          const geminiModel = 'gemini-2.5-flash';
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+          const response = await fetch(geminiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ role: 'user', parts: [{ text: prompt }]}],
+              generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+            }),
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Gemini API error (fallback):', errorText);
+            throw new Error(`Gemini API error (fallback): ${response.status} - ${errorText}`);
+          }
+          const data = await response.json();
+          console.log('Gemini response received (fallback):', JSON.stringify(data, null, 2));
+          const candidate = data?.candidates?.[0];
+          let markdownReport = '';
+          const parts = candidate?.content?.parts;
+          if (Array.isArray(parts) && parts.length > 0) {
+            markdownReport = parts.map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? ''))).join('');
+          } else if (typeof (candidate as any)?.text === 'string') {
+            markdownReport = (candidate as any).text;
+          }
+          if (!markdownReport && typeof (data as any).text === 'string') {
+            markdownReport = (data as any).text;
+          }
+          if (!markdownReport || !markdownReport.trim()) {
+            throw new Error('Fallback Gemini não retornou texto útil.');
+          }
+          analysis = { markdownReport };
+        } else {
+          const claudeKey = Deno.env.get('ANTHROPIC_API_KEY');
+          if (!claudeKey) {
+            throw new Error('OPENAI_API_KEY não configurada e sem fallback disponível (GEMINI/ANTHROPIC ausentes).');
+          }
+          const claudeUrl = 'https://api.anthropic.com/v1/messages';
+          const response = await fetch(claudeUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': claudeKey, 'anthropic-version': '2023-06-01' },
+            body: JSON.stringify({ model: 'claude-sonnet-4-5', max_tokens: 8192, messages: [{ role: 'user', content: prompt }]}),
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Claude API error (fallback):', errorText);
+            throw new Error(`Claude API error (fallback): ${response.status} - ${errorText}`);
+          }
+          const data = await response.json();
+          console.log('Claude response received (fallback)');
+          const markdownReport = data.content?.[0]?.text ?? '';
+          if (!markdownReport) throw new Error('Fallback Claude não retornou texto útil.');
+          analysis = { markdownReport };
+        }
+      } else {
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            messages: [
+              { role: 'user', content: prompt },
+            ],
+            max_tokens: 8192,
+          }),
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('OpenAI API error:', errorText);
+          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+        }
+        const data = await response.json();
+        console.log('OpenAI response received');
+        const markdownReport = data.choices?.[0]?.message?.content ?? '';
+        analysis = { markdownReport };
       }
 
-      const data = await response.json();
-      console.log('OpenAI response received');
-      
-      const markdownReport = data.choices[0].message.content;
-      analysis = { markdownReport };
     } else {
       throw new Error('Modelo não suportado');
     }
