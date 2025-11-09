@@ -47,17 +47,10 @@ serve(async (req) => {
     const currentKeyId = apiKeyResult.keyId;
     console.log('YouTube API Key detectada:', YOUTUBE_API_KEY.substring(0, 10) + '...');
 
+    const requestData = await req.json();
     const {
       keyword = '',
-      maxChannelVideos = 500,
-      minViews = 5000,
       viralScore = 3.5,
-      minEngagement = 0.001,
-      maxVideoAge = 14,
-      maxSubscribers = 100000,
-      minSubscribers = 1000,
-      maxChannelAge = null,
-      minViewSubRatio = 0,
       country = 'any',
       language = 'any',
       videoDuration = 'any',
@@ -66,10 +59,21 @@ serve(async (req) => {
       allowPartial = true,
       granularity = 'standard',
       aiModel = 'gemini-2.5-flash',
-    } = await req.json();
+    } = requestData;
 
     // Verificar se estamos em "Modo de Descoberta"
     const isDiscoveryMode = !keyword || keyword.trim().length === 0;
+    
+    // CRÍTICO: No modo descoberta, usar filtros ULTRA-ABERTOS para permitir análise de centenas de vídeos
+    // Os filtros restritivos devem ser aplicados APENAS pela IA na análise de nichos
+    const maxChannelVideos = isDiscoveryMode ? 10000 : (requestData.maxChannelVideos || 500);
+    const minViews = isDiscoveryMode ? 0 : (requestData.minViews || 5000);
+    const minEngagement = isDiscoveryMode ? 0 : (requestData.minEngagement || 0.001);
+    const maxVideoAge = isDiscoveryMode ? 365 : (requestData.maxVideoAge || 14);
+    const maxSubscribers = isDiscoveryMode ? 10000000 : (requestData.maxSubscribers || 100000);
+    const minSubscribers = isDiscoveryMode ? 0 : (requestData.minSubscribers || 1000);
+    const maxChannelAge = isDiscoveryMode ? null : (requestData.maxChannelAge || null);
+    const minViewSubRatio = isDiscoveryMode ? 0 : (requestData.minViewSubRatio || 0);
 
     console.log(isDiscoveryMode 
       ? '🔍 MODO DE DESCOBERTA ATIVADO - Buscando por categorias populares'
