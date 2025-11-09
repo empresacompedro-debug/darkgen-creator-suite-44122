@@ -32,96 +32,156 @@ serve(async (req) => {
     console.log(`👤 [brainstorm-ideas] User ID: ${userId || 'Nenhum'}`);
     
     const body = await req.json();
-    
     const battleMode = body.battleMode || false;
-    
-    // Validar prompt
+
+    // Validação
     const errors = [
       ...validateString(body.prompt, 'prompt', { required: true, maxLength: 2000 }),
     ];
-    
-    if (!battleMode) {
+
+    if (battleMode) {
+      if (!body.selectedModels || !Array.isArray(body.selectedModels) || body.selectedModels.length === 0) {
+        errors.push({
+          field: 'selectedModels',
+          message: 'selectedModels é obrigatório no modo batalha e deve conter pelo menos 1 modelo'
+        });
+      }
+    } else {
       errors.push(...validateString(body.aiModel, 'aiModel', { required: true, maxLength: 50 }));
     }
-    
+
     validateOrThrow(errors);
-    
+
     const userPrompt = sanitizeString(body.prompt);
+    const selectedModels: string[] = battleMode ? body.selectedModels : [];
     const aiModel = battleMode ? null : body.aiModel;
+
+    const systemPrompt = `Você é um especialista em criação de conteúdo viral para YouTube e descoberta de nichos lucrativos.
+
+Sua tarefa é responder às perguntas do usuário de forma detalhada, fornecendo insights valiosos sobre nichos, micronichos, tendências e estratégias de conteúdo.
+
+DIRETRIZES:
+- Seja específico e prático nas suas respostas
+- Se o usuário pedir uma lista (ex: 100 nichos), forneça EXATAMENTE a quantidade solicitada
+- Numere as listas quando apropriado
+- Inclua informações sobre CPM estimado quando relevante
+- Foque em nichos lucrativos e com potencial de engajamento
+- Use exemplos concretos sempre que possível
+
+Responda de forma clara, organizada e valiosa.`;
+
+    const fullPrompt = `${systemPrompt}\n\nPERGUNTA DO USUÁRIO:\n${userPrompt}`;
 
     console.log('Processing prompt:', { battleMode, aiModel, promptLength: userPrompt.length });
     
-    // Modo batalha: detectar todas as IAs disponíveis
+    // Modo batalha: detectar IAs selecionadas pelo usuário
     if (battleMode) {
-      const availableModels: Array<{provider: string, model: string, apiKey: string}> = [];
+      console.log('Battle mode activated with models:', selectedModels);
       
-      // Verificar Claude
-      let claudeKey = '';
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'anthropic')
-          .eq('is_active', true)
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
+      const availableModels: Array<{
+        name: string;
+        provider: 'anthropic' | 'google' | 'openai';
+        apiKey: string;
+        model: string;
+      }> = [];
+
+      // Detectar apenas IAs selecionadas pelo usuário
+      for (const modelId of selectedModels) {
+        let provider: 'anthropic' | 'google' | 'openai';
+        let apiKey: string = '';
+
+        // Determinar provider baseado no ID do modelo
+        if (modelId.startsWith('claude')) {
+          provider = 'anthropic';
+          // Buscar chave do usuário primeiro
+          if (userId) {
+            const { data: keys } = await supabase
+              .from('user_api_keys')
+              .select('api_key_encrypted')
+              .eq('user_id', userId)
+              .eq('api_provider', 'anthropic')
+              .eq('is_active', true)
+              .limit(1);
+            
+            if (keys && keys.length > 0) {
+              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+                p_encrypted: keys[0].api_key_encrypted,
+                p_user_id: userId,
+              });
+              if (decrypted) apiKey = decrypted as string;
+            }
+          }
+          if (!apiKey) apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+        } else if (modelId.startsWith('gemini')) {
+          provider = 'google';
+          // Buscar chave do usuário primeiro
+          if (userId) {
+            const { data: keys } = await supabase
+              .from('user_api_keys')
+              .select('api_key_encrypted')
+              .eq('user_id', userId)
+              .eq('api_provider', 'google')
+              .eq('is_active', true)
+              .limit(1);
+            
+            if (keys && keys.length > 0) {
+              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+                p_encrypted: keys[0].api_key_encrypted,
+                p_user_id: userId,
+              });
+              if (decrypted) apiKey = decrypted as string;
+            }
+          }
+          if (!apiKey) apiKey = Deno.env.get('GEMINI_API_KEY') || '';
+        } else if (modelId.startsWith('gpt')) {
+          provider = 'openai';
+          // Buscar chave do usuário primeiro
+          if (userId) {
+            const { data: keys } = await supabase
+              .from('user_api_keys')
+              .select('api_key_encrypted')
+              .eq('user_id', userId)
+              .eq('api_provider', 'openai')
+              .eq('is_active', true)
+              .limit(1);
+            
+            if (keys && keys.length > 0) {
+              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+                p_encrypted: keys[0].api_key_encrypted,
+                p_user_id: userId,
+              });
+              if (decrypted) apiKey = decrypted as string;
+            }
+          }
+          if (!apiKey) apiKey = Deno.env.get('OPENAI_API_KEY') || '';
+        } else {
+          console.log(`Unknown model: ${modelId}`);
+          continue;
+        }
+
+        if (apiKey) {
+          availableModels.push({
+            name: modelId,
+            provider,
+            apiKey,
+            model: modelId
           });
-          if (decrypted) claudeKey = decrypted as string;
+          console.log(`✓ ${modelId} available (${provider})`);
+        } else {
+          console.log(`✗ ${modelId} skipped - no API key`);
         }
       }
-      if (!claudeKey) claudeKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
-      if (claudeKey) availableModels.push({ provider: 'claude', model: 'claude-sonnet-4.5', apiKey: claudeKey });
-      
-      // Verificar Gemini
-      let geminiKey = '';
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'google')
-          .eq('is_active', true)
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
-          });
-          if (decrypted) geminiKey = decrypted as string;
-        }
+
+      if (availableModels.length === 0) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Nenhuma API key configurada para os modelos selecionados. Configure suas chaves de API nas configurações.' 
+          }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
-      if (!geminiKey) geminiKey = Deno.env.get('GEMINI_API_KEY') || '';
-      if (geminiKey) availableModels.push({ provider: 'gemini', model: 'gemini-2.0-flash-exp', apiKey: geminiKey });
-      
-      // Verificar OpenAI
-      let openaiKey = '';
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'openai')
-          .eq('is_active', true)
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
-          });
-          if (decrypted) openaiKey = decrypted as string;
-        }
-      }
-      if (!openaiKey) openaiKey = Deno.env.get('OPENAI_API_KEY') || '';
-      if (openaiKey) availableModels.push({ provider: 'openai', model: 'gpt-4o-mini', apiKey: openaiKey });
-      
-      console.log(`🏆 Batalha iniciada com ${availableModels.length} IAs`);
+
+      console.log(`Starting battle with ${availableModels.length} models`);
       
       // Stream combinado de todas as IAs
       const stream = new ReadableStream({
@@ -129,13 +189,13 @@ serve(async (req) => {
           const encoder = new TextEncoder();
           
           // Iniciar todas as chamadas simultaneamente
-          const streamPromises = availableModels.map(async ({ provider, model, apiKey }) => {
+          const streamPromises = availableModels.map(async ({ name, provider, model, apiKey }) => {
             try {
               let apiUrl = '';
               let headers: Record<string, string> = { 'Content-Type': 'application/json' };
               let requestBody: any = {};
               
-              if (provider === 'claude') {
+              if (provider === 'anthropic') {
                 apiUrl = 'https://api.anthropic.com/v1/messages';
                 headers['x-api-key'] = apiKey;
                 headers['anthropic-version'] = '2023-06-01';
@@ -145,7 +205,7 @@ serve(async (req) => {
                   messages: [{ role: 'user', content: fullPrompt }],
                   stream: true
                 };
-              } else if (provider === 'gemini') {
+              } else if (provider === 'google') {
                 apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
                 requestBody = {
                   contents: [{ parts: [{ text: fullPrompt }] }]
@@ -184,7 +244,7 @@ serve(async (req) => {
                   
                   let content = '';
                   
-                  if (provider === 'claude' && line.startsWith('data: ')) {
+                  if (provider === 'anthropic' && line.startsWith('data: ')) {
                     const data = line.slice(6);
                     if (data === '[DONE]') continue;
                     try {
@@ -193,7 +253,7 @@ serve(async (req) => {
                         content = parsed.delta?.text || '';
                       }
                     } catch {}
-                  } else if (provider === 'gemini' && line.startsWith('data: ')) {
+                  } else if (provider === 'google' && line.startsWith('data: ')) {
                     const data = line.slice(6);
                     try {
                       const parsed = JSON.parse(data);
@@ -209,13 +269,13 @@ serve(async (req) => {
                   }
                   
                   if (content) {
-                    const sseData = `data: ${JSON.stringify({ model, content })}\n\n`;
+                    const sseData = `data: ${JSON.stringify({ model: name, content })}\n\n`;
                     controller.enqueue(encoder.encode(sseData));
                   }
                 }
               }
             } catch (error) {
-              console.error(`Error streaming ${model}:`, error);
+              console.error(`Error streaming ${name}:`, error);
             }
           });
           
@@ -235,22 +295,7 @@ serve(async (req) => {
       });
     }
 
-    // System prompt conversacional
-    const systemPrompt = `Você é um especialista em criação de conteúdo viral para YouTube e descoberta de nichos lucrativos.
-
-Sua tarefa é responder às perguntas do usuário de forma detalhada, fornecendo insights valiosos sobre nichos, micronichos, tendências e estratégias de conteúdo.
-
-DIRETRIZES:
-- Seja específico e prático nas suas respostas
-- Se o usuário pedir uma lista (ex: 100 nichos), forneça EXATAMENTE a quantidade solicitada
-- Numere as listas quando apropriado
-- Inclua informações sobre CPM estimado quando relevante
-- Foque em nichos lucrativos e com potencial de engajamento
-- Use exemplos concretos sempre que possível
-
-Responda de forma clara, organizada e valiosa.`;
-
-    const fullPrompt = `${systemPrompt}\n\nPERGUNTA DO USUÁRIO:\n${userPrompt}`;
+    // Modo single AI - System prompt conversacional
 
     let apiUrl = '';
     let apiKey = '';

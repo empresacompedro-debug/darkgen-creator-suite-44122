@@ -12,6 +12,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { UserManual } from "@/components/brainstorm/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
+import { cn } from "@/lib/utils";
+
+const AVAILABLE_AI_MODELS = [
+  { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "Anthropic", icon: "🤖" },
+  { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet", provider: "Anthropic", icon: "🤖" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", icon: "✨" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", icon: "⚡" },
+  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", provider: "Google", icon: "⚡" },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", icon: "🔥" },
+  { id: "gpt-4.1-2025-04-14", name: "GPT-4.1", provider: "OpenAI", icon: "🔥" }
+];
 
 const Brainstorm = () => {
   const { toast } = useToast();
@@ -22,6 +33,11 @@ const Brainstorm = () => {
   const [aiModel, setAiModel] = useState("claude-sonnet-4.5");
   const [battleMode, setBattleMode] = useState(false);
   const [battleResponses, setBattleResponses] = useState<Record<string, string>>({});
+  const [selectedAIs, setSelectedAIs] = useState<string[]>([
+    "claude-sonnet-4-5",
+    "gemini-2.5-flash",
+    "gpt-4o-mini"
+  ]);
   const [history, setHistory] = useState<any[]>([]);
   const [viewingHistory, setViewingHistory] = useState<any>(null);
   const [showManual, setShowManual] = useState(false);
@@ -29,6 +45,32 @@ const Brainstorm = () => {
   useEffect(() => {
     loadHistory();
   }, []);
+
+  const toggleAI = (aiId: string) => {
+    setSelectedAIs(prev => {
+      if (prev.includes(aiId)) {
+        if (prev.length === 1) {
+          toast({
+            title: "Atenção",
+            description: "Pelo menos 1 IA deve estar selecionada",
+            variant: "destructive"
+          });
+          return prev;
+        }
+        return prev.filter(id => id !== aiId);
+      } else {
+        return [...prev, aiId];
+      }
+    });
+  };
+
+  const selectAllAIs = () => {
+    setSelectedAIs(AVAILABLE_AI_MODELS.map(ai => ai.id));
+  };
+
+  const deselectAllAIs = () => {
+    setSelectedAIs([AVAILABLE_AI_MODELS[0].id]);
+  };
 
   const loadHistory = async () => {
     const { data } = await supabase
@@ -65,7 +107,8 @@ const Brainstorm = () => {
             },
             body: JSON.stringify({
               prompt: prompt.trim(),
-              battleMode: true
+              battleMode: true,
+              selectedModels: selectedAIs
             })
           }
         );
@@ -266,7 +309,10 @@ const Brainstorm = () => {
                   Batalha de IAs
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Todas as IAs com API key respondem simultaneamente
+                  {battleMode 
+                    ? `${selectedAIs.length} IA${selectedAIs.length > 1 ? 's' : ''} selecionada${selectedAIs.length > 1 ? 's' : ''}`
+                    : 'Ative para comparar múltiplas IAs'
+                  }
                 </p>
               </div>
             </div>
@@ -276,6 +322,69 @@ const Brainstorm = () => {
               onCheckedChange={setBattleMode}
             />
           </div>
+
+          {battleMode && (
+            <Card className="p-4 bg-accent/5 border-dashed">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-semibold">Selecione as IAs para batalhar:</Label>
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={selectAllAIs}
+                      className="text-xs h-7"
+                    >
+                      Todas
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      onClick={deselectAllAIs}
+                      className="text-xs h-7"
+                    >
+                      Limpar
+                    </Button>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {AVAILABLE_AI_MODELS.map((ai) => (
+                    <div
+                      key={ai.id}
+                      onClick={() => toggleAI(ai.id)}
+                      className={cn(
+                        "flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all hover:scale-105",
+                        selectedAIs.includes(ai.id)
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-background hover:border-primary/50"
+                      )}
+                    >
+                      <div className="flex items-center gap-2 flex-1">
+                        <span className="text-xl">{ai.icon}</span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium">{ai.name}</span>
+                          <span className="text-xs text-muted-foreground">{ai.provider}</span>
+                        </div>
+                      </div>
+                      <div className={cn(
+                        "h-5 w-5 rounded border-2 flex items-center justify-center transition-all",
+                        selectedAIs.includes(ai.id)
+                          ? "bg-primary border-primary"
+                          : "border-muted-foreground/30"
+                      )}>
+                        {selectedAIs.includes(ai.id) && (
+                          <svg className="h-3 w-3 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
 
           {!battleMode && (
             <AIModelSelector 
@@ -287,7 +396,7 @@ const Brainstorm = () => {
 
           <Button
             onClick={handleStreamIdeas}
-            disabled={isStreaming || !prompt.trim()}
+            disabled={isStreaming || !prompt.trim() || (battleMode && selectedAIs.length === 0)}
             className="w-full"
           >
             {isStreaming ? (
@@ -298,7 +407,7 @@ const Brainstorm = () => {
             ) : (
               <>
                 {battleMode ? <Swords className="h-4 w-4 mr-2" /> : <Sparkles className="h-4 w-4 mr-2" />}
-                {battleMode ? 'Iniciar Batalha' : 'Enviar Pergunta'}
+                {battleMode ? `Iniciar Batalha (${selectedAIs.length} IA${selectedAIs.length > 1 ? 's' : ''})` : 'Enviar Pergunta'}
               </>
             )}
           </Button>
