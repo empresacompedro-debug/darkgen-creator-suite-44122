@@ -60,14 +60,16 @@ const NicheFinder = () => {
     channelAgeMin: 0,
     channelAgeMax: 3650, // 10 anos
     subscribersMin: 0,
-    subscribersMax: 5000000
+    subscribersMax: 5000000,
+    minDurationSeconds: 0 // Novo filtro de duração
   });
 
   const [tempFilters, setTempFilters] = useState({
     channelAgeMin: 0,
     channelAgeMax: 3650,
     subscribersMin: 0,
-    subscribersMax: 5000000
+    subscribersMax: 5000000,
+    minDurationSeconds: 0
   });
 
   useEffect(() => {
@@ -366,14 +368,16 @@ const NicheFinder = () => {
       }
       
       const subs = video.subscriberCount || 0;
+      const duration = video.durationSeconds || 0;
       
       const agePass = channelAge >= postFilters.channelAgeMin && channelAge <= postFilters.channelAgeMax;
       const subsPass = subs >= postFilters.subscribersMin && subs <= postFilters.subscribersMax;
-      const passes = agePass && subsPass;
+      const durationPass = duration >= postFilters.minDurationSeconds;
+      const passes = agePass && subsPass && durationPass;
       
       // Log detalhado apenas para vídeos filtrados (para não poluir console)
       if (!passes) {
-        console.log(`❌ Filtrado: ${video.title?.substring(0, 50)}... - Idade: ${channelAge}d (${agePass ? '✅' : '❌'}) - Subs: ${subs} (${subsPass ? '✅' : '❌'})`);
+        console.log(`❌ Filtrado: ${video.title?.substring(0, 50)}... - Idade: ${channelAge}d (${agePass ? '✅' : '❌'}) - Subs: ${subs} (${subsPass ? '✅' : '❌'}) - Duração: ${duration}s (${durationPass ? '✅' : '❌'})`);
       }
       
       return passes;
@@ -387,17 +391,17 @@ const NicheFinder = () => {
     let newFilters;
     switch (preset) {
       case 'new':
-        newFilters = { channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000 };
+        newFilters = { channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000, minDurationSeconds: 0 };
         break;
       case 'growing':
-        newFilters = { channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000 };
+        newFilters = { channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000, minDurationSeconds: 0 };
         break;
       case 'established':
-        newFilters = { channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000 };
+        newFilters = { channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000, minDurationSeconds: 0 };
         break;
       case 'reset':
       default:
-        newFilters = { channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000 };
+        newFilters = { channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000, minDurationSeconds: 0 };
         break;
     }
     setTempFilters(newFilters);
@@ -411,7 +415,8 @@ const NicheFinder = () => {
       channelAgeMin: tempFilters.channelAgeMin,
       channelAgeMax: tempFilters.channelAgeMax,
       subscribersMin: tempFilters.subscribersMin,
-      subscribersMax: tempFilters.subscribersMax
+      subscribersMax: tempFilters.subscribersMax,
+      minDurationSeconds: tempFilters.minDurationSeconds
     };
 
     // Remover duplicados por ID antes de pré-visualizar
@@ -420,12 +425,14 @@ const NicheFinder = () => {
       const channelAge = video.channelAgeInDays;
       if (channelAge === null || channelAge === undefined) return false;
       const subs = video.subscriberCount || 0;
+      const duration = video.durationSeconds || 0;
       
       return (
         channelAge >= previewFilters.channelAgeMin &&
         channelAge <= previewFilters.channelAgeMax &&
         subs >= previewFilters.subscribersMin &&
-        subs <= previewFilters.subscribersMax
+        subs <= previewFilters.subscribersMax &&
+        duration >= previewFilters.minDurationSeconds
       );
     });
     
@@ -877,6 +884,55 @@ const NicheFinder = () => {
                         </div>
                         <p className="text-xs text-muted-foreground">
                           💡 Referência: 10K = 10.000 | 100K = 100.000 | 1M = 1.000.000
+                        </p>
+                      </div>
+
+                      {/* Filtro de Duração Mínima */}
+                      <div className="space-y-3">
+                        <Label className="text-sm font-semibold">⏱️ Duração Mínima do Vídeo</Label>
+                        <div className="space-y-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={7200}
+                            step={60}
+                            value={tempFilters.minDurationSeconds}
+                            onChange={(e) => setTempFilters({ ...tempFilters, minDurationSeconds: Number(e.target.value) })}
+                            placeholder="0"
+                          />
+                          <div className="flex gap-2 flex-wrap">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setTempFilters({ ...tempFilters, minDurationSeconds: 0 })}
+                            >
+                              Todos
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setTempFilters({ ...tempFilters, minDurationSeconds: 1200 })}
+                            >
+                              &gt;20 min
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setTempFilters({ ...tempFilters, minDurationSeconds: 1800 })}
+                            >
+                              &gt;30 min
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setTempFilters({ ...tempFilters, minDurationSeconds: 3600 })}
+                            >
+                              &gt;60 min
+                            </Button>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          💡 Duração em segundos: 1200s = 20min | 1800s = 30min | 3600s = 60min
                         </p>
                       </div>
 
