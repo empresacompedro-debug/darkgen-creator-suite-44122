@@ -25,6 +25,8 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const encoder = new TextEncoder();
+
   try {
     const body = await req.json();
     
@@ -76,10 +78,14 @@ serve(async (req) => {
       pl: 'Polski (Polska)'
     };
 
-    const translations: Record<string, string> = {};
-
-    for (const targetLang of targetLanguages) {
-      const prompt = `Você é um tradutor profissional especializado em roteiros de YouTube.
+    // Create streaming response
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for (const targetLang of targetLanguages) {
+            // Send language start marker
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, status: 'start' })}\n\n`));
+            const prompt = `Você é um tradutor profissional especializado em roteiros de YouTube.
 
 Traduza o seguinte roteiro para ${languageNames[targetLang] || targetLang}.
 
@@ -96,125 +102,210 @@ ${script}
 
 TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
 
-      let apiUrl = '';
-      let apiKey = '';
-      let requestBody: any = {};
+            let apiUrl = '';
+            let apiKey = '';
+            let requestBody: any = {};
 
-      if (modelToUse.startsWith('claude')) {
-        console.log(`🔑 [translate-script] Buscando API key Anthropic para ${targetLang}`);
-        
-        const keyData = await getApiKey(userId, 'claude', supabase);
-        if (!keyData) {
-          throw new Error('API key não configurada para Claude');
+            if (modelToUse.startsWith('claude')) {
+              console.log(`🔑 [translate-script] Buscando API key Anthropic para ${targetLang}`);
+              
+              const keyData = await getApiKey(userId, 'claude', supabase);
+              if (!keyData) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para Claude' })}\n\n`));
+                continue;
+              }
+              
+              apiKey = keyData.key;
+              console.log('✅ [translate-script] API key encontrada');
+              
+              apiUrl = 'https://api.anthropic.com/v1/messages';
+              const modelMap: Record<string, string> = {
+                'claude-sonnet-4-5': 'claude-sonnet-4-20250514',
+                'claude-sonnet-4.5': 'claude-sonnet-4-20250514',
+                'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet-20250219',
+                'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514'
+              };
+              const finalModel = modelMap[modelToUse] || 'claude-sonnet-4-20250514';
+              console.log(`🤖 [translate-script] Modelo mapeado: ${modelToUse} → ${finalModel}`);
+              const maxTokens = getMaxTokensForModel(finalModel);
+              console.log(`📦 [translate-script] Usando ${maxTokens} max_tokens para ${finalModel} (${targetLang})`);
+              
+              requestBody = {
+                model: finalModel,
+                max_tokens: maxTokens,
+                messages: [{ role: 'user', content: prompt }],
+                stream: true
+              };
+            } else if (modelToUse.startsWith('gemini')) {
+              console.log(`🔑 [translate-script] Buscando API key Gemini para ${targetLang}`);
+              
+              const keyData = await getApiKey(userId, 'gemini', supabase);
+              if (!keyData) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para Gemini' })}\n\n`));
+                continue;
+              }
+              
+              apiKey = keyData.key;
+              const modelMap: Record<string, string> = {
+                'gemini-2.5-pro': 'gemini-2.0-flash-exp',
+                'gemini-2.5-flash': 'gemini-2.0-flash-exp',
+                'gemini-2.5-flash-lite': 'gemini-1.5-flash'
+              };
+              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[modelToUse] || 'gemini-2.0-flash-exp'}:streamGenerateContent?key=${apiKey}&alt=sse`;
+              requestBody = {
+                contents: [{ parts: [{ text: prompt }] }]
+              };
+            } else if (modelToUse.startsWith('gpt')) {
+              console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
+              
+              const keyData = await getApiKey(userId, 'openai', supabase);
+              if (!keyData) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para OpenAI' })}\n\n`));
+                continue;
+              }
+              
+              apiKey = keyData.key;
+              apiUrl = 'https://api.openai.com/v1/chat/completions';
+              const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
+              const maxTokens = getMaxTokensForModel(modelToUse);
+              console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${modelToUse} (${targetLang})`);
+              
+              requestBody = {
+                model: modelToUse,
+                messages: [{ role: 'user', content: prompt }],
+                stream: true,
+                ...(isReasoningModel 
+                  ? { max_completion_tokens: maxTokens }
+                  : { max_tokens: maxTokens }
+                )
+              };
+            }
+
+            if (!apiKey) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: `API key não configurada para ${modelToUse}` })}\n\n`));
+              continue;
+            }
+
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json'
+            };
+
+            if (modelToUse.startsWith('claude')) {
+              headers['x-api-key'] = apiKey;
+              headers['anthropic-version'] = '2023-06-01';
+            } else if (modelToUse.startsWith('gpt')) {
+              headers['Authorization'] = `Bearer ${apiKey}`;
+            }
+
+            console.log(`🚀 [translate-script] Enviando requisição streaming para ${targetLang}:`, apiUrl);
+            
+            const response = await fetch(apiUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(requestBody)
+            });
+
+            console.log(`📨 [translate-script] Status da resposta (${targetLang}):`, response.status);
+
+            if (!response.ok) {
+              const errorData = await response.text();
+              console.error(`❌ [translate-script] Erro da API (${targetLang}):`, errorData);
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: `API Error: ${response.status}` })}\n\n`));
+              continue;
+            }
+
+            // Process streaming response
+            if (!response.body) {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'No response body' })}\n\n`));
+              continue;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (!line.trim() || line.startsWith(':')) continue;
+                
+                if (modelToUse.startsWith('claude')) {
+                  // Claude SSE format
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                      const parsed = JSON.parse(data);
+                      if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, text: parsed.delta.text })}\n\n`));
+                      }
+                    } catch (e) {
+                      console.error('Error parsing Claude chunk:', e);
+                    }
+                  }
+                } else if (modelToUse.startsWith('gpt')) {
+                  // OpenAI SSE format
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                      const parsed = JSON.parse(data);
+                      const content = parsed.choices?.[0]?.delta?.content;
+                      if (content) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, text: content })}\n\n`));
+                      }
+                    } catch (e) {
+                      console.error('Error parsing GPT chunk:', e);
+                    }
+                  }
+                } else if (modelToUse.startsWith('gemini')) {
+                  // Gemini SSE format
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    try {
+                      const parsed = JSON.parse(data);
+                      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                      if (text) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, text })}\n\n`));
+                      }
+                    } catch (e) {
+                      console.error('Error parsing Gemini chunk:', e);
+                    }
+                  }
+                }
+              }
+            }
+
+            // Send language completion marker
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, status: 'done' })}\n\n`));
+          }
+
+          // Send final done marker
+          controller.enqueue(encoder.encode(`data: [DONE]\n\n`));
+          controller.close();
+        } catch (error: any) {
+          console.error('❌ [translate-script] Stream error:', error);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: error.message })}\n\n`));
+          controller.close();
         }
-        
-        apiKey = keyData.key;
-        console.log('✅ [translate-script] API key encontrada');
-        
-        apiUrl = 'https://api.anthropic.com/v1/messages';
-        const modelMap: Record<string, string> = {
-          'claude-sonnet-4-5': 'claude-sonnet-4-20250514',
-          'claude-sonnet-4.5': 'claude-sonnet-4-20250514',
-          'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet-20250219',
-          'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514'
-        };
-        const finalModel = modelMap[modelToUse] || 'claude-sonnet-4-20250514';
-        console.log(`🤖 [translate-script] Modelo mapeado: ${modelToUse} → ${finalModel}`);
-        const maxTokens = getMaxTokensForModel(finalModel);
-        console.log(`📦 [translate-script] Usando ${maxTokens} max_tokens para ${finalModel} (${targetLang})`);
-        
-        requestBody = {
-          model: finalModel,
-          max_tokens: maxTokens,
-          messages: [{ role: 'user', content: prompt }]
-        };
-      } else if (modelToUse.startsWith('gemini')) {
-        console.log(`🔑 [translate-script] Buscando API key Gemini para ${targetLang}`);
-        
-        const keyData = await getApiKey(userId, 'gemini', supabase);
-        if (!keyData) {
-          throw new Error('API key não configurada para Gemini');
-        }
-        
-        apiKey = keyData.key;
-        const modelMap: Record<string, string> = {
-          'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-          'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-          'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-        };
-        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[modelToUse] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`;
-        requestBody = {
-          contents: [{ parts: [{ text: prompt }] }]
-        };
-      } else if (modelToUse.startsWith('gpt')) {
-        console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
-        
-        const keyData = await getApiKey(userId, 'openai', supabase);
-        if (!keyData) {
-          throw new Error('API key não configurada para OpenAI');
-        }
-        
-        apiKey = keyData.key;
-        apiUrl = 'https://api.openai.com/v1/chat/completions';
-        const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
-        const maxTokens = getMaxTokensForModel(modelToUse);
-        console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${modelToUse} (${targetLang})`);
-        
-        requestBody = {
-          model: modelToUse,
-          messages: [{ role: 'user', content: prompt }],
-          ...(isReasoningModel 
-            ? { max_completion_tokens: maxTokens }
-            : { max_tokens: maxTokens }
-          )
-        };
       }
+    });
 
-      if (!apiKey) {
-        throw new Error(`API key não configurada para ${modelToUse}`);
-      }
-
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-
-      if (modelToUse.startsWith('claude')) {
-        headers['x-api-key'] = apiKey;
-        headers['anthropic-version'] = '2023-06-01';
-      } else if (modelToUse.startsWith('gpt')) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
-
-      console.log(`🚀 [translate-script] Enviando requisição para ${targetLang}:`, apiUrl);
-      
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody)
-      });
-
-      console.log(`📨 [translate-script] Status da resposta (${targetLang}):`, response.status);
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error(`❌ [translate-script] Erro da API (${targetLang}):`, errorData);
-        console.error(`❌ [translate-script] Status (${targetLang}):`, response.status);
-        throw new Error(`API Error: ${response.status} - ${errorData}`);
-      }
-
-      const data = await response.json();
-
-      if (modelToUse.startsWith('claude')) {
-        translations[targetLang] = data.content[0].text;
-      } else if (modelToUse.startsWith('gemini')) {
-        translations[targetLang] = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      } else if (modelToUse.startsWith('gpt')) {
-        translations[targetLang] = data.choices[0].message.content;
-      }
-    }
-
-    return new Response(JSON.stringify({ translations, modelUsed: modelToUse }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(stream, {
+      headers: { 
+        ...corsHeaders, 
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      },
     });
   } catch (error: any) {
     console.error('❌ [translate-script] Erro:', error.name);

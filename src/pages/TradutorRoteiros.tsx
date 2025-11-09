@@ -27,6 +27,8 @@ const TradutorRoteiros = () => {
   const [viewingHistory, setViewingHistory] = useState<any>(null);
   const [showManual, setShowManual] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [currentLanguage, setCurrentLanguage] = useState<string>("");
+  const [streamingTranslations, setStreamingTranslations] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadHistory();
@@ -79,19 +81,85 @@ const TradutorRoteiros = () => {
     }
 
     setIsLoading(true);
+    setTranslations({});
+    setStreamingTranslations({});
+    setCurrentLanguage("");
+
     try {
-      const { data, error } = await supabase.functions.invoke('translate-script', {
-        body: { script, targetLanguages: selectedLanguages, aiModel }
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/translate-script`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+          },
+          body: JSON.stringify({ script, targetLanguages: selectedLanguages, aiModel })
+        }
+      );
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao traduzir roteiro');
+      }
 
-      setTranslations(data.translations || {});
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const finalTranslations: Record<string, string> = {};
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') break;
+
+            try {
+              const parsed = JSON.parse(data);
+              
+              if (parsed.error) {
+                toast({
+                  title: "Erro na Tradução",
+                  description: parsed.error,
+                  variant: "destructive"
+                });
+                continue;
+              }
+
+              if (parsed.language) {
+                if (parsed.status === 'start') {
+                  setCurrentLanguage(parsed.language);
+                  finalTranslations[parsed.language] = '';
+                  setStreamingTranslations({ ...finalTranslations });
+                } else if (parsed.text) {
+                  finalTranslations[parsed.language] = (finalTranslations[parsed.language] || '') + parsed.text;
+                  setStreamingTranslations({ ...finalTranslations });
+                } else if (parsed.status === 'done') {
+                  setTranslations(prev => ({ ...prev, [parsed.language]: finalTranslations[parsed.language] }));
+                }
+              }
+            } catch (e) {
+              console.error('Erro ao parsear chunk:', e);
+            }
+          }
+        }
+      }
+
+      setCurrentLanguage("");
       
       await supabase.from('translations').insert({
         original_script: script,
         target_languages: selectedLanguages,
-        translated_content: JSON.stringify(data.translations),
+        translated_content: JSON.stringify(finalTranslations),
         ai_model: aiModel,
         user_id: user?.id
       } as any);
@@ -109,6 +177,7 @@ const TradutorRoteiros = () => {
       });
     } finally {
       setIsLoading(false);
+      setStreamingTranslations({});
     }
   };
 
@@ -215,10 +284,48 @@ const TradutorRoteiros = () => {
         </div>
       </Card>
 
-      {Object.keys(translations).length > 0 && (
+      {(Object.keys(translations).length > 0 || Object.keys(streamingTranslations).length > 0) && (
         <div className="space-y-4">
           <h2 className="text-2xl font-bold text-foreground">Traduções</h2>
-          {Object.entries(translations).map(([lang, content]) => {
+          
+          {/* Streaming translations (in progress) */}
+          {Object.entries(streamingTranslations).map(([lang, content]) => {
+            const langName = languages.find(l => l.code === lang)?.name || lang;
+            const isCurrentlyTranslating = currentLanguage === lang;
+            return (
+              <Card key={lang} className="p-6 shadow-soft">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-semibold text-foreground">{langName}</h3>
+                    {isCurrentlyTranslating && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Traduzindo...</span>
+                      </div>
+                    )}
+                  </div>
+                  {!isCurrentlyTranslating && content && (
+                    <Button
+                      onClick={() => handleExport(lang, content)}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Exportar
+                    </Button>
+                  )}
+                </div>
+                <Textarea 
+                  value={content} 
+                  readOnly 
+                  className="min-h-[200px] font-mono text-sm" 
+                />
+              </Card>
+            );
+          })}
+
+          {/* Completed translations */}
+          {Object.entries(translations).filter(([lang]) => !streamingTranslations[lang]).map(([lang, content]) => {
             const langName = languages.find(l => l.code === lang)?.name || lang;
             return (
               <Card key={lang} className="p-6 shadow-soft">
