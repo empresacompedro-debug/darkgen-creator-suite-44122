@@ -162,36 +162,54 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
             } else if (modelToUse.startsWith('gpt')) {
               console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
               
-              const keyData = await getApiKey(userId, 'openai', supabase);
-              if (!keyData) {
+              // Buscar chave do usuário diretamente (como analyze-titles faz)
+              if (userId) {
+                const { data: keys } = await supabase
+                  .from('user_api_keys')
+                  .select('id, api_key_encrypted')
+                  .eq('user_id', userId)
+                  .eq('api_provider', 'openai')
+                  .eq('is_active', true)
+                  .order('is_current', { ascending: false })
+                  .order('priority', { ascending: true })
+                  .limit(1);
+                
+                if (keys && keys.length > 0) {
+                  const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+                    p_encrypted: keys[0].api_key_encrypted,
+                    p_user_id: userId,
+                  });
+                  if (decrypted) {
+                    apiKey = decrypted as string;
+                    console.log(`✅ [translate-script] Usando chave do usuário`);
+                  }
+                }
+              }
+              
+              // Fallback para chave global
+              if (!apiKey) {
+                const globalKey = Deno.env.get('OPENAI_API_KEY');
+                if (globalKey) {
+                  apiKey = globalKey;
+                  console.log(`✅ [translate-script] Usando chave global`);
+                }
+              }
+              
+              if (!apiKey) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para OpenAI' })}\n\n`));
                 continue;
               }
               
-              apiKey = keyData.key;
               apiUrl = 'https://api.openai.com/v1/chat/completions';
               
-              // Mapear modelos OpenAI corretamente
-              const openaiModelMap: Record<string, string> = {
-                'gpt-4o-mini': 'gpt-4o-mini',
-                'gpt-4.1-2025-04-14': 'gpt-4-turbo',
-                'gpt-4.1': 'gpt-4-turbo'
-              };
-              const finalOpenAIModel = openaiModelMap[modelToUse] || modelToUse;
-              console.log(`🤖 [translate-script] Modelo OpenAI mapeado: ${modelToUse} → ${finalOpenAIModel}`);
-              
-              const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
-              const maxTokens = getMaxTokensForModel(modelToUse);
-              console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${finalOpenAIModel} (${targetLang})`);
+              // Usar modelo EXATAMENTE como veio (sem mapeamento) e max_tokens fixo como analyze-titles
+              console.log(`🤖 [translate-script] Usando modelo: ${modelToUse}`);
               
               requestBody = {
-                model: finalOpenAIModel,
+                model: modelToUse,
                 messages: [{ role: 'user', content: prompt }],
                 stream: true,
-                ...(isReasoningModel 
-                  ? { max_completion_tokens: maxTokens }
-                  : { max_tokens: maxTokens }
-                )
+                max_tokens: 8192
               };
             }
 
