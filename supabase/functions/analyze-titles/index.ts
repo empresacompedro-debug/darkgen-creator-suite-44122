@@ -221,7 +221,10 @@ IMPORTANTE:
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 16384,
+            maxOutputTokens: 32768,
+            thinkingConfig: {
+              thinkingMode: "DISABLED"
+            }
           },
         }),
       });
