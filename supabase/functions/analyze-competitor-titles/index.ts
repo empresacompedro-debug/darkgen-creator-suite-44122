@@ -727,12 +727,25 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ Erro Kimi API:', errorText);
+        
+        // Parse error para detectar tipo específico
+        let errorData: any = null;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {}
+
         if (response.status === 401) {
           throw new Error('❌ API Key do Kimi inválida. Verifique sua chave em Configurações.');
         }
+        
         if (response.status === 429) {
-          throw new Error('❌ Limite de uso da API do Kimi excedido.');
+          // Verificar se é quota excedida ou rate limit temporário
+          if (errorData?.error?.type === 'exceeded_current_quota_error') {
+            throw new Error('❌ Sua conta Kimi está suspensa ou sem créditos. Verifique seu plano e billing em https://platform.moonshot.ai ou use outro modelo de IA.');
+          }
+          throw new Error('❌ Limite de requisições do Kimi excedido. Aguarde alguns minutos e tente novamente.');
         }
+        
         throw new Error(`Kimi API Error: ${response.status} - ${errorText.slice(0, 200)}`);
       }
 
@@ -741,6 +754,12 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       // VALIDAÇÃO: Verificar se há erro retornado
       if (data.error) {
         console.error('❌ Erro reportado pelo Kimi:', JSON.stringify(data.error));
+        
+        // Detectar quota excedida no response body
+        if (data.error.type === 'exceeded_current_quota_error') {
+          throw new Error('❌ Sua conta Kimi está suspensa ou sem créditos. Verifique seu plano e billing em https://platform.moonshot.ai ou use outro modelo de IA.');
+        }
+        
         throw new Error(`Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`);
       }
 
