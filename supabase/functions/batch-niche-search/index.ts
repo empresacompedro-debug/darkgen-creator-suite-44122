@@ -214,7 +214,10 @@ async function searchNiche(niche: string, userId: string, supabaseClient: any, f
     }
     
     // Filtro 2: Inscritos mínimos no canal (800+ inscritos)
-    if (filters.minSubscribers && video.subscriberCount < filters.minSubscribers) {
+    // IMPORTANTE: Só filtra se temos dados do canal (subscriberCount > 0)
+    // Se subscriberCount = 0, significa que não conseguimos buscar os dados do canal
+    // Nesse caso, mantemos o vídeo para não perder resultados válidos
+    if (filters.minSubscribers && video.subscriberCount > 0 && video.subscriberCount < filters.minSubscribers) {
       return false;
     }
     
