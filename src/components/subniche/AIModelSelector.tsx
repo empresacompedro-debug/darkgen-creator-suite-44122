@@ -24,15 +24,6 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       maxVideos: 800
     },
     { 
-      id: "claude-sonnet-4", 
-      name: "Claude Sonnet 4", 
-      provider: "Anthropic",
-      description: "Requer API key",
-      requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 600
-    },
-    { 
       id: "claude-sonnet-3.7", 
       name: "Claude Sonnet 3.7", 
       provider: "Anthropic",
@@ -71,41 +62,13 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
     },
     // Modelos OpenAI
     { 
-      id: "gpt-4o", 
-      name: "GPT-4o", 
+      id: "gpt-4o-mini", 
+      name: "GPT-4o Mini (Legacy)", 
       provider: "OpenAI",
-      description: "Requer API key",
+      description: "Legacy leve - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />,
+      icon: <Zap className="h-3 w-3" />,
       maxVideos: 500
-    },
-    // ========== NOVOS MODELOS GPT 2025 ==========
-    { 
-      id: "gpt-5-2025-08-07", 
-      name: "GPT-5", 
-      provider: "OpenAI",
-      description: "Flagship 2025 - Requer API key",
-      requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 600
-    },
-    { 
-      id: "gpt-5-mini-2025-08-07", 
-      name: "GPT-5 Mini", 
-      provider: "OpenAI",
-      description: "Rápido e eficiente - Requer API key",
-      requiresKey: true,
-      icon: <Zap className="h-3 w-3" />,
-      maxVideos: 800
-    },
-    { 
-      id: "gpt-5-nano-2025-08-07", 
-      name: "GPT-5 Nano", 
-      provider: "OpenAI",
-      description: "Ultra rápido - Requer API key",
-      requiresKey: true,
-      icon: <Zap className="h-3 w-3" />,
-      maxVideos: 1000
     },
     { 
       id: "gpt-4.1-2025-04-14", 
@@ -115,42 +78,6 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       requiresKey: true,
       icon: <Sparkles className="h-3 w-3" />,
       maxVideos: 600
-    },
-    { 
-      id: "gpt-4.1-mini-2025-04-14", 
-      name: "GPT-4.1 Mini", 
-      provider: "OpenAI",
-      description: "GPT-4 leve - Requer API key",
-      requiresKey: true,
-      icon: <Zap className="h-3 w-3" />,
-      maxVideos: 600
-    },
-    { 
-      id: "o3-2025-04-16", 
-      name: "O3 Reasoning", 
-      provider: "OpenAI",
-      description: "Raciocínio avançado - Requer API key",
-      requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 1000
-    },
-    { 
-      id: "o4-mini-2025-04-16", 
-      name: "O4 Mini Reasoning", 
-      provider: "OpenAI",
-      description: "Raciocínio rápido - Requer API key",
-      requiresKey: true,
-      icon: <Zap className="h-3 w-3" />,
-      maxVideos: 1000
-    },
-    { 
-      id: "gpt-4o-mini", 
-      name: "GPT-4o Mini", 
-      provider: "OpenAI",
-      description: "Legacy leve - Requer API key",
-      requiresKey: true,
-      icon: <Zap className="h-3 w-3" />,
-      maxVideos: 500
     }
   ];
 
