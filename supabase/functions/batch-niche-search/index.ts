@@ -206,10 +206,15 @@ async function searchNiche(niche: string, userId: string, supabaseClient: any, f
     })
   );
 
-  // Aplicar filtros dinâmicos do usuário - APENAS duração mínima
+  // Aplicar filtros dinâmicos do usuário
   const filtered = processedVideos.filter(video => {
-    // ÚNICO FILTRO: Duração mínima em segundos (8+ minutos = 480 segundos)
+    // Filtro 1: Duração mínima em segundos (8+ minutos = 480 segundos)
     if (filters.minDuration && video.durationSeconds < filters.minDuration) {
+      return false;
+    }
+    
+    // Filtro 2: Inscritos mínimos no canal (800+ inscritos)
+    if (filters.minSubscribers && video.subscriberCount < filters.minSubscribers) {
       return false;
     }
     
@@ -259,11 +264,12 @@ serve(async (req) => {
       });
     }
 
-  // Valores padrão ULTRA-SIMPLES: APENAS duração 8+ minutos
+  // Filtros padrão: duração 8+ minutos e 800+ inscritos
   const defaultFilters = {
-    minDuration: 480,      // ÚNICO FILTRO: 8+ minutos
-    videoDuration: 'any',  // Não limitar
-    maxPages: 10           // 10 páginas = ~500 vídeos, 1.250 quota
+    minDuration: 480,       // Filtro 1: 8+ minutos
+    minSubscribers: 800,    // Filtro 2: 800+ inscritos no canal
+    videoDuration: 'any',   // Não limitar na busca
+    maxPages: 10            // 10 páginas = ~500 vídeos, 1.250 quota
   };
 
     const appliedFilters = { ...defaultFilters, ...filters };

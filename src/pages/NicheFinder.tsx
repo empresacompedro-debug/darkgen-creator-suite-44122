@@ -247,11 +247,12 @@ const NicheFinder = () => {
           body: {
             nichesBatch: batch,
             batchSearchId: batchSearch.id,
-            filters: {
-              minDuration: 480,
-              videoDuration: 'any',
-              maxPages: maxPagesPerNiche
-            }
+          filters: {
+            minDuration: 480,
+            minSubscribers: 800,
+            videoDuration: 'any',
+            maxPages: maxPagesPerNiche
+          }
           }
         });
         
@@ -381,7 +382,7 @@ const NicheFinder = () => {
               Modo Lote Ativo
             </h3>
             <p className="text-sm text-blue-700 dark:text-blue-300">
-              Filtro único: Vídeos ≥ 8 minutos • Até 500 vídeos por nicho
+              Filtros: Vídeos ≥ 8 minutos • Canais ≥ 800 inscritos • Até 500 vídeos/nicho
             </p>
           </div>
         </div>
@@ -448,7 +449,7 @@ const NicheFinder = () => {
               🔍 Buscar 1 Nicho
             </Label>
             <p className="text-sm text-muted-foreground mb-2">
-              Digite uma palavra-chave para buscar vídeos virais (≥ 8 min)
+              Digite uma palavra-chave para buscar vídeos virais (≥ 8 min, canais ≥ 800 inscritos)
             </p>
           </div>
           <div className="flex gap-2">
@@ -487,7 +488,7 @@ const NicheFinder = () => {
               📋 Buscar Vários Nichos (Modo Lote)
             </Label>
             <p className="text-sm text-muted-foreground mb-2">
-              Cole sua lista de nichos abaixo. Cada linha = 1 nicho. Até 500 vídeos/nicho.
+              Cole sua lista de nichos abaixo. Cada linha = 1 nicho. Filtros: ≥ 8 min + ≥ 800 inscritos.
             </p>
           </div>
           <Textarea
