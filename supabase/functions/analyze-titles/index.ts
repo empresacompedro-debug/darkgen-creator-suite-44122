@@ -64,12 +64,7 @@ serve(async (req) => {
         throw new Error('GEMINI_API_KEY não configurada');
       }
     } else if (aiModel.includes('gpt')) {
-      apiKey = Deno.env.get('OPENAI_API_KEY');
       apiUrl = 'https://api.openai.com/v1/chat/completions';
-      
-      if (!apiKey) {
-        throw new Error('OPENAI_API_KEY não configurada. Por favor, configure a chave da OpenAI.');
-      }
     } else {
       throw new Error(`Modelo não suportado: ${aiModel}`);
     }
@@ -164,7 +159,7 @@ IMPORTANTE:
 
     console.log('Sending request to AI model...');
 
-    let analysis: AnalysisResult;
+    let analysis: AnalysisResult = { markdownReport: '' };
 
     // Make API request based on model
     if (aiModel.includes('claude')) {
@@ -256,42 +251,124 @@ IMPORTANTE:
       
       analysis = { markdownReport };
       
-    } else if (aiModel.includes('gpt')) {
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: aiModel,
-          messages: [
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          max_tokens: 8192,
-        }),
-      });
+      // OpenAI request with user-specific key retrieval and simple rotation
+      // Helper to fetch and decrypt the user's current OpenAI key
+      const getUserOpenAIKey = async (): Promise<{ key: string; id: string } | null> => {
+        if (!userId) return null;
+        const { data: keys, error } = await supabase
+          .from('user_api_keys')
+          .select('id, api_key_encrypted, is_active, priority, is_current')
+          .eq('user_id', userId)
+          .eq('api_provider', 'openai')
+          .eq('is_active', true)
+          .order('is_current', { ascending: false })
+          .order('priority', { ascending: true })
+          .limit(1);
+        if (error) {
+          console.error('Erro ao buscar chaves OpenAI do usuário:', error);
+          return null;
+        }
+        if (!keys || keys.length === 0) return null;
+        const k = keys[0];
+        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted: k.api_key_encrypted,
+          p_user_id: userId,
+        });
+        if (decErr || !decrypted) {
+          console.error('Erro ao descriptografar chave OpenAI do usuário:', decErr);
+          throw new Error('Falha ao descriptografar API Key do usuário');
+        }
+        return { key: decrypted as string, id: k.id };
+      };
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('OpenAI API error:', errorText);
-        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      const envOpenAIKey = Deno.env.get('OPENAI_API_KEY');
+
+      let currentKeyInfo: { key: string; id: string } | null = null;
+      let lastErrorText: string | null = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (!currentKeyInfo) {
+          try {
+            currentKeyInfo = await getUserOpenAIKey();
+          } catch (e) {
+            console.error('Erro ao obter chave do usuário:', e);
+          }
+        }
+
+        const openaiKeyToUse = currentKeyInfo?.key || envOpenAIKey;
+        if (!openaiKeyToUse) {
+          throw new Error('OPENAI_API_KEY não configurada');
+        }
+
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKeyToUse}`,
+          },
+          body: JSON.stringify({
+            model: aiModel,
+            messages: [
+              {
+                role: 'user',
+                content: prompt,
+              },
+            ],
+            max_tokens: 8192,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          lastErrorText = errorText;
+          console.error('OpenAI API error:', response.status, errorText);
+
+          // Se for erro de quota/rate limit e estivermos usando chave do usuário, tentar rotacionar
+          if (response.status === 429 && currentKeyInfo) {
+            try {
+              await supabase
+                .from('user_api_keys')
+                .update({
+                  is_active: false,
+                  is_current: false,
+                  quota_status: { exceeded: true, exceeded_at: new Date().toISOString() },
+                })
+                .eq('id', currentKeyInfo.id);
+              console.log('Chave marcada como esgotada, tentando próxima...');
+              currentKeyInfo = null;
+              continue; // tentar novamente com próxima chave
+            } catch (rotErr) {
+              console.error('Erro ao rotacionar chave:', rotErr);
+            }
+          }
+
+          throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('OpenAI response received');
+
+        const markdownReport = data.choices?.[0]?.message?.content;
+        if (!markdownReport) {
+          console.error('OpenAI response missing content:', data);
+          throw new Error('OpenAI não retornou conteúdo válido');
+        }
+
+        // Atualiza uso da chave do usuário
+        if (currentKeyInfo) {
+          await supabase
+            .from('user_api_keys')
+            .update({ last_used_at: new Date().toISOString(), is_current: true })
+            .eq('id', currentKeyInfo.id);
+        }
+
+        analysis = { markdownReport };
+        break;
       }
 
-      const data = await response.json();
-      console.log('OpenAI response received');
-      
-      const markdownReport = data.choices?.[0]?.message?.content;
-      if (!markdownReport) {
-        console.error('OpenAI response missing content:', data);
-        throw new Error('OpenAI não retornou conteúdo válido');
+      if (!analysis) {
+        throw new Error(lastErrorText || 'Falha ao obter resposta do OpenAI');
       }
-      analysis = { markdownReport };
-
-    } else {
       throw new Error('Modelo não suportado');
     }
 
