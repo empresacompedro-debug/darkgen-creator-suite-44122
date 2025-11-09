@@ -4,7 +4,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Sparkles, Loader2, Trash2, Eye, BookOpen, Swords, Trophy } from "lucide-react";
+import { Sparkles, Loader2, Trash2, Eye, BookOpen, Swords, Trophy, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -263,6 +263,21 @@ const Brainstorm = () => {
     });
   };
 
+  const handleExportPDF = (model: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `brainstorm-${model}-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Exportado!",
+      description: `Resposta de ${model} exportada com sucesso`
+    });
+  };
+
   const handleDeleteHistory = async (id: string) => {
     await supabase.from('brainstorm_ideas').delete().eq('id', id);
     await loadHistory();
@@ -429,14 +444,26 @@ const Brainstorm = () => {
                     <h3 className="font-bold text-lg">{model}</h3>
                   </div>
                   {!isStreaming && (
-                    <Button 
-                      size="sm" 
-                      onClick={() => handleSelectWinner(model)}
-                      className="gap-2"
-                    >
-                      <Trophy className="h-4 w-4" />
-                      Escolher
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        onClick={() => handleSelectWinner(model)}
+                        variant="outline"
+                        className="gap-2"
+                      >
+                        <Trophy className="h-4 w-4" />
+                        Escolher
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        onClick={() => handleExportPDF(model, response)}
+                        variant="outline"
+                        className="gap-2"
+                      >
+                        <Download className="h-4 w-4" />
+                        Exportar PDF
+                      </Button>
+                    </div>
                   )}
                 </div>
                 <div className="prose prose-sm max-w-none">

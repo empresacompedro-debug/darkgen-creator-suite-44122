@@ -14,6 +14,7 @@ import { CharacterManager } from "@/components/prompts/CharacterManager";
 import { CharacterData } from "@/components/prompts/CharacterForm";
 import { cleanScriptMarkings, countWords } from "@/lib/scriptUtils";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 const PromptsParaCenas = () => {
   const { toast } = useToast();
@@ -28,7 +29,7 @@ const PromptsParaCenas = () => {
   const [optimizeFor, setOptimizeFor] = useState("flux");
   const [language, setLanguage] = useState("pt");
   const [includeText, setIncludeText] = useState(false);
-  const [aiModel, setAiModel] = useState("gemini-2.5-flash");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [generatedPrompts, setGeneratedPrompts] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -458,23 +459,11 @@ const PromptsParaCenas = () => {
             <label htmlFor="includeText" className="text-sm">Incluir texto na imagem</label>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ai-model">Modelo de IA</Label>
-            <Select value={aiModel} onValueChange={setAiModel}>
-              <SelectTrigger id="ai-model"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
-                <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
-                <SelectItem value="claude-sonnet-3.5">Claude Sonnet 3.5</SelectItem>
-                <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</SelectItem>
-                <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <AIModelSelector 
+            value={aiModel} 
+            onChange={setAiModel}
+            label="Modelo de IA"
+          />
 
           <Button onClick={handleGeneratePrompts} disabled={isLoading} className="w-full">
             {isLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Gerando Prompts...</> : <><FileText className="h-4 w-4 mr-2" />Gerar Prompts de Cena</>}

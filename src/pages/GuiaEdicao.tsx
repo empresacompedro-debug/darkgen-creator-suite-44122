@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, FileText, Copy, Download, Trash2, Eye, BookOpen, Zap } from "lucide-react";
@@ -11,13 +10,14 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UserManual } from "@/components/editing-guide/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 export default function GuiaEdicao() {
   const [script, setScript] = useState("");
   const [scenePrompts, setScenePrompts] = useState("");
   const [srtContent, setSrtContent] = useState("");
   const [imagesPerScene, setImagesPerScene] = useState(1);
-  const [aiModel, setAiModel] = useState("gemini-2.5-pro");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState("");
   const [validation, setValidation] = useState<any>(null);
@@ -445,25 +445,11 @@ export default function GuiaEdicao() {
           </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Modelo de IA</label>
-          <Select value={aiModel} onValueChange={setAiModel}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
-              <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
-              <SelectItem value="claude-sonnet-3.5">Claude Sonnet 3.5</SelectItem>
-              <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-              <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-              <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</SelectItem>
-              <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-              <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-              <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <AIModelSelector 
+          value={aiModel} 
+          onChange={setAiModel}
+          label="Modelo de IA"
+        />
 
         <Button onClick={handleGenerate} disabled={loading} className="w-full">
           {loading ? (

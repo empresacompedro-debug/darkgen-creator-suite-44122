@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { getApiKey } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -88,87 +89,37 @@ Responda de forma clara, organizada e valiosa.`;
       // Detectar apenas IAs selecionadas pelo usuário
       for (const modelId of selectedModels) {
         let provider: 'anthropic' | 'google' | 'openai';
-        let apiKey: string = '';
-
-        // Determinar provider baseado no ID do modelo
+        let providerKey: 'claude' | 'gemini' | 'openai';
+        
         if (modelId.startsWith('claude')) {
           provider = 'anthropic';
-          // Buscar chave do usuário primeiro
-          if (userId) {
-            const { data: keys } = await supabase
-              .from('user_api_keys')
-              .select('api_key_encrypted')
-              .eq('user_id', userId)
-              .eq('api_provider', 'anthropic')
-              .eq('is_active', true)
-              .limit(1);
-            
-            if (keys && keys.length > 0) {
-              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-                p_encrypted: keys[0].api_key_encrypted,
-                p_user_id: userId,
-              });
-              if (decrypted) apiKey = decrypted as string;
-            }
-          }
-          if (!apiKey) apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+          providerKey = 'claude';
         } else if (modelId.startsWith('gemini')) {
           provider = 'google';
-          // Buscar chave do usuário primeiro
-          if (userId) {
-            const { data: keys } = await supabase
-              .from('user_api_keys')
-              .select('api_key_encrypted')
-              .eq('user_id', userId)
-              .eq('api_provider', 'google')
-              .eq('is_active', true)
-              .limit(1);
-            
-            if (keys && keys.length > 0) {
-              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-                p_encrypted: keys[0].api_key_encrypted,
-                p_user_id: userId,
-              });
-              if (decrypted) apiKey = decrypted as string;
-            }
-          }
-          if (!apiKey) apiKey = Deno.env.get('GEMINI_API_KEY') || '';
+          providerKey = 'gemini';
         } else if (modelId.startsWith('gpt')) {
           provider = 'openai';
-          // Buscar chave do usuário primeiro
-          if (userId) {
-            const { data: keys } = await supabase
-              .from('user_api_keys')
-              .select('api_key_encrypted')
-              .eq('user_id', userId)
-              .eq('api_provider', 'openai')
-              .eq('is_active', true)
-              .limit(1);
-            
-            if (keys && keys.length > 0) {
-              const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-                p_encrypted: keys[0].api_key_encrypted,
-                p_user_id: userId,
-              });
-              if (decrypted) apiKey = decrypted as string;
-            }
-          }
-          if (!apiKey) apiKey = Deno.env.get('OPENAI_API_KEY') || '';
+          providerKey = 'openai';
         } else {
           console.log(`Unknown model: ${modelId}`);
           continue;
         }
 
-        if (apiKey) {
-          availableModels.push({
-            name: modelId,
-            provider,
-            apiKey,
-            model: modelId
-          });
-          console.log(`✓ ${modelId} available (${provider})`);
-        } else {
-          console.log(`✗ ${modelId} skipped - no API key`);
+        try {
+          const keyData = await getApiKey(userId || undefined, providerKey, supabase);
+          if (keyData) {
+            availableModels.push({
+              name: modelId,
+              provider,
+              apiKey: keyData.key,
+              model: modelId
+            });
+            console.log(`✓ ${modelId} available (${provider})`);
+          } else {
+            console.log(`✗ ${modelId} skipped - no API key`);
+          }
+        } catch (error) {
+          console.error(`Error getting key for ${modelId}:`, error);
         }
       }
 
@@ -303,35 +254,9 @@ Responda de forma clara, organizada e valiosa.`;
 
     if (aiModel.startsWith('claude')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key Anthropic`);
-      
-      // Buscar chave do usuário primeiro
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('id, api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'anthropic')
-          .eq('is_active', true)
-          .order('is_current', { ascending: false })
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
-          });
-          if (decrypted) {
-            apiKey = decrypted as string;
-            console.log(`✅ [brainstorm-ideas] Usando chave do usuário`);
-          }
-        }
-      }
-      
-      // Fallback para chave global
-      if (!apiKey) {
-        apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
-        if (apiKey) console.log(`✅ [brainstorm-ideas] Usando chave global`);
-      }
+      const keyData = await getApiKey(userId || undefined, 'claude', supabase);
+      if (!keyData) throw new Error('API key não configurada para Claude');
+      apiKey = keyData.key;
       
       apiUrl = 'https://api.anthropic.com/v1/messages';
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
@@ -344,35 +269,9 @@ Responda de forma clara, organizada e valiosa.`;
       };
     } else if (aiModel.startsWith('gemini')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key Google`);
-      
-      // Buscar chave do usuário primeiro
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('id, api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'google')
-          .eq('is_active', true)
-          .order('is_current', { ascending: false })
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
-          });
-          if (decrypted) {
-            apiKey = decrypted as string;
-            console.log(`✅ [brainstorm-ideas] Usando chave do usuário`);
-          }
-        }
-      }
-      
-      // Fallback para chave global
-      if (!apiKey) {
-        apiKey = Deno.env.get('GEMINI_API_KEY') || '';
-        if (apiKey) console.log(`✅ [brainstorm-ideas] Usando chave global`);
-      }
+      const keyData = await getApiKey(userId || undefined, 'gemini', supabase);
+      if (!keyData) throw new Error('API key não configurada para Gemini');
+      apiKey = keyData.key;
       
       apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
@@ -382,39 +281,9 @@ Responda de forma clara, organizada e valiosa.`;
       };
     } else if (aiModel.startsWith('gpt')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key OpenAI`);
-      
-      // Buscar chave do usuário primeiro
-      if (userId) {
-        const { data: keys } = await supabase
-          .from('user_api_keys')
-          .select('id, api_key_encrypted')
-          .eq('user_id', userId)
-          .eq('api_provider', 'openai')
-          .eq('is_active', true)
-          .order('is_current', { ascending: false })
-          .order('priority', { ascending: true })
-          .limit(1);
-        
-        if (keys && keys.length > 0) {
-          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
-            p_encrypted: keys[0].api_key_encrypted,
-            p_user_id: userId,
-          });
-          if (decrypted) {
-            apiKey = decrypted as string;
-            console.log(`✅ [brainstorm-ideas] Usando chave do usuário`);
-          }
-        }
-      }
-      
-      // Fallback para chave global
-      if (!apiKey) {
-        const globalKey = Deno.env.get('OPENAI_API_KEY');
-        if (globalKey) {
-          apiKey = globalKey;
-          console.log(`✅ [brainstorm-ideas] Usando chave global`);
-        }
-      }
+      const keyData = await getApiKey(userId || undefined, 'openai', supabase);
+      if (!keyData) throw new Error('API key não configurada para OpenAI');
+      apiKey = keyData.key;
       
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
