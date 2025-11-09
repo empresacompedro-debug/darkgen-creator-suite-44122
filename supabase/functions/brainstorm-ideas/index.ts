@@ -164,12 +164,21 @@ Responda de forma clara, organizada e valiosa.`;
               } else if (provider === 'openai') {
                 apiUrl = 'https://api.openai.com/v1/chat/completions';
                 headers['Authorization'] = `Bearer ${apiKey}`;
+                
+                // Detectar se é modelo reasoning ou gpt-4.1+
+                const isReasoningModel = model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-') || model.startsWith('gpt-4.1');
+                
                 requestBody = {
                   model,
                   messages: [{ role: 'user', content: fullPrompt }],
-                  max_tokens: 8192,
+                  ...(isReasoningModel 
+                    ? { max_completion_tokens: 8192 }
+                    : { max_tokens: 8192 }
+                  ),
                   stream: true
                 };
+                
+                console.log(`🎯 [brainstorm-battle] ${model} usando ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'}`);
               }
               
               const response = await fetch(apiUrl, {
@@ -288,12 +297,20 @@ Responda de forma clara, organizada e valiosa.`;
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
       
+      // Detectar se é modelo reasoning ou gpt-4.1+
+      const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-') || aiModel.startsWith('gpt-4.1');
+      
       requestBody = {
         model: aiModel,
         messages: [{ role: 'user', content: fullPrompt }],
-        max_tokens: 8192,
+        ...(isReasoningModel 
+          ? { max_completion_tokens: 8192 }
+          : { max_tokens: 8192 }
+        ),
         stream: true
       };
+      
+      console.log(`🎯 [brainstorm-single] ${aiModel} usando ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'}`);
     }
 
     if (!apiKey) {
