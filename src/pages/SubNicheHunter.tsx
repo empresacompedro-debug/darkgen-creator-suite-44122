@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Loader2, Target, Download, Trash2, TrendingUp, Save, FolderOpen, BookOpen, Zap, Copy, CheckCircle2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Loader2, Target, Download, Trash2, TrendingUp, Save, FolderOpen, BookOpen, Zap, Copy, CheckCircle2, FileText, XCircle } from "lucide-react";
 import { exportToExcel } from "@/lib/exportToExcel";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import {
@@ -29,7 +30,7 @@ import { useLoadingProgress, StageConfig } from "@/hooks/useLoadingProgress";
 import { LoadingProgress } from "@/components/ui/loading-progress";
 import { Sparkles, Database, CheckCircle, AlertCircle, ChevronDown, ChevronUp, Trophy, ChevronRight } from "lucide-react";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 interface SubNicheResult {
   nome: string;
@@ -137,6 +138,11 @@ const SubNicheHunter = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   
+  // PASSO 1: Limpa Títulos state
+  const [rawTitles, setRawTitles] = useState("");
+  const [cleanedTitles, setCleanedTitles] = useState("");
+  const [showCleanedOutput, setShowCleanedOutput] = useState(false);
+
   // Função para extrair a estrutura de um título
   const extractTitleStructure = (title: string): string => {
     // Padrões comuns em títulos de horror
@@ -439,7 +445,85 @@ const SubNicheHunter = () => {
     return lines.filter(line => /\d+/.test(line)).length;
   };
 
+  // Função de limpeza de títulos
+  const cleanTitles = () => {
+    if (!rawTitles.trim()) {
+      toast({
+        title: "⚠️ Campo vazio",
+        description: "Cole os títulos originais antes de limpar",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Processa linha por linha
+    const lines = rawTitles.split('\n');
+    const cleanedLines: string[] = [];
+    
+    for (const line of lines) {
+      if (!line.trim()) {
+        cleanedLines.push(''); // Mantém linhas vazias
+        continue;
+      }
+      
+      // Limpa cada linha:
+      // 1. Remove acentos (NFD + remove combining diacritics)
+      // 2. Remove TODOS caracteres especiais exceto letras, números e espaços
+      // 3. Normaliza espaços múltiplos
+      const cleaned = line
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+        .replace(/[^a-zA-Z0-9\s]/g, ' ') // Remove caracteres especiais
+        .replace(/\s+/g, ' ')             // Normaliza espaços
+        .trim();
+      
+      cleanedLines.push(cleaned);
+    }
+    
+    // Junta tudo mantendo a estrutura original
+    const result = cleanedLines.join('\n');
+    
+    setCleanedTitles(result);
+    setShowCleanedOutput(true);
+
+    // Conta vídeos (grupos de 4 linhas + 1 em branco)
+    const videoCount = Math.floor(cleanedLines.filter(l => l.trim()).length / 4);
+
+    toast({
+      title: "✅ Títulos limpos com sucesso!",
+      description: `${videoCount} vídeos processados`,
+    });
+  };
+
+  // Detecta caracteres especiais (exceto letras, números, espaços e quebras)
+  const hasSpecialCharacters = (text: string): boolean => {
+    return /[^a-zA-Z0-9\s\n\r]/.test(text);
+  };
+
+  // Retorna mensagem de aviso se houver caracteres especiais
+  const getSpecialCharacterWarning = (text: string): string | null => {
+    if (!text.trim()) return null;
+    
+    if (hasSpecialCharacters(text)) {
+      const matches = text.match(/[^a-zA-Z0-9\s\n\r]/g) || [];
+      const uniqueChars = [...new Set(matches)].slice(0, 15).join(', ');
+      return `Caracteres especiais encontrados: ${uniqueChars}`;
+    }
+    
+    return null;
+  };
+
   const analyzeCompetitorTitles = async () => {
+    // VALIDAÇÃO: Bloquear se houver caracteres especiais
+    const warning = getSpecialCharacterWarning(competitorData);
+    if (warning) {
+      toast({
+        title: "❌ Títulos contêm caracteres especiais!",
+        description: "Use o PASSO 1 acima para limpar os títulos antes de analisar",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!competitorData.trim()) {
       toast({
         title: "Erro",
@@ -814,22 +898,188 @@ const SubNicheHunter = () => {
 
         {/* Tab 1: Análise de Títulos */}
         <TabsContent value="analysis" className="space-y-6">
-          <Card>
+          {/* PASSO 1: LIMPA TÍTULOS */}
+          <Card className="border-2 border-orange-500/50 bg-gradient-to-br from-orange-500/10 to-yellow-500/5">
             <CardHeader>
-              <CardTitle>Análise de Títulos de Concorrentes</CardTitle>
-              <CardDescription>
-                Cole os dados dos vídeos (títulos, visualizações, tempo, VPH) e descubra os sub-nichos
-              </CardDescription>
+              <div className="flex items-center gap-3">
+                <Badge className="bg-orange-600 hover:bg-orange-600 text-white text-lg px-4 py-1.5 font-bold">
+                  PASSO 1
+                </Badge>
+                <div className="flex-1">
+                  <CardTitle className="text-2xl flex items-center gap-2">
+                    <Sparkles className="h-6 w-6 text-orange-500" />
+                    Limpa Títulos
+                  </CardTitle>
+                  <CardDescription className="text-base mt-1">
+                    Cole os títulos originais com acentos e caracteres especiais. Clique em "Limpar" para preparar para análise.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Input: Títulos Originais */}
+              <div className="space-y-2">
+                <Label htmlFor="raw-titles" className="text-base font-semibold">
+                  📝 Títulos Originais (com acentos e caracteres especiais)
+                </Label>
+                <Textarea
+                  id="raw-titles"
+                  placeholder={`Cole aqui os títulos originais, exemplo:
+
+"My Mom Said: \"I Wish You Were Never Born\""
+857 visualizações
+há 5 horas
+166 VPH
+
+120 BANNED Photos—That Reveal What Was Never Meant to Be Seen!
+2,5 mil visualizações
+há 1 dia
+61 VPH`}
+                  value={rawTitles}
+                  onChange={(e) => setRawTitles(e.target.value)}
+                  className="min-h-[280px] font-mono text-sm resize-none"
+                />
+                {rawTitles && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <FileText className="h-4 w-4" />
+                    {rawTitles.split('\n').filter(l => l.trim()).length} linhas • ~{Math.floor(rawTitles.split('\n').filter(l => l.trim()).length / 4)} vídeos
+                  </p>
+                )}
+              </div>
+
+              {/* Botão Limpar */}
+              <Button 
+                onClick={cleanTitles}
+                disabled={!rawTitles.trim()}
+                className="w-full bg-orange-600 hover:bg-orange-700 text-white font-semibold"
+                size="lg"
+              >
+                <Zap className="mr-2 h-5 w-5" />
+                Limpar Títulos Agora
+              </Button>
+
+              {/* Output: Títulos Limpos */}
+              {showCleanedOutput && (
+                <div className="space-y-3 pt-4 border-t-2 border-orange-500/30">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="cleaned-titles" className="text-base font-semibold text-green-600 dark:text-green-400 flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      Títulos Limpos (prontos para análise)
+                    </Label>
+                    <Button
+                      onClick={() => {
+                        navigator.clipboard.writeText(cleanedTitles);
+                        toast({ 
+                          title: "✅ Copiado!", 
+                          description: "Agora cole no PASSO 2 abaixo" 
+                        });
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="font-semibold"
+                    >
+                      <Copy className="mr-2 h-4 w-4" />
+                      Copiar Tudo
+                    </Button>
+                  </div>
+                  
+                  <Textarea
+                    id="cleaned-titles"
+                    value={cleanedTitles}
+                    readOnly
+                    className="min-h-[280px] font-mono text-sm bg-green-500/10 border-2 border-green-500/50 resize-none"
+                  />
+                  
+                  <Alert className="bg-green-500/10 border-2 border-green-500/50">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+                    <AlertDescription className="text-base">
+                      <strong>✅ Títulos limpos e prontos!</strong>
+                      <br />
+                      Agora copie e cole no <strong className="text-primary">PASSO 2</strong> abaixo para analisar.
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* PASSO 2: ANÁLISE DE TÍTULOS */}
+          <Card className={cn(
+            "border-2",
+            getSpecialCharacterWarning(competitorData) 
+              ? "border-red-500/50 bg-red-500/5" 
+              : "border-primary/50"
+          )}>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <Badge className={cn(
+                  "text-lg px-4 py-1.5 font-bold",
+                  getSpecialCharacterWarning(competitorData)
+                    ? "bg-red-600 hover:bg-red-600"
+                    : "bg-primary hover:bg-primary"
+                )}>
+                  PASSO 2
+                </Badge>
+                <div className="flex-1">
+                  <CardTitle className="text-2xl">🎯 Análise de Títulos de Concorrentes</CardTitle>
+                  <CardDescription className="text-base mt-1">
+                    Cole APENAS os títulos limpos do PASSO 1 (sem acentos ou caracteres especiais)
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Alerta se detectar caracteres especiais */}
+              {competitorData && getSpecialCharacterWarning(competitorData) && (
+                <Alert variant="destructive" className="border-2">
+                  <AlertCircle className="h-5 w-5" />
+                  <AlertTitle className="text-base font-bold">
+                    ❌ Caracteres especiais detectados!
+                  </AlertTitle>
+                  <AlertDescription className="text-sm">
+                    <strong>{getSpecialCharacterWarning(competitorData)}</strong>
+                    <br />
+                    <br />
+                    Volte ao <strong>PASSO 1</strong> acima e limpe os títulos antes de continuar.
+                    <br />
+                    A análise não funcionará com caracteres especiais.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="competitor-data">Dados dos Vídeos</Label>
+                <Label htmlFor="competitor-data" className="text-base font-semibold flex items-center gap-2">
+                  {getSpecialCharacterWarning(competitorData) ? (
+                    <>
+                      <XCircle className="h-5 w-5 text-red-500" />
+                      <span className="text-red-500">Dados dos Vídeos (precisam ser limpos!)</span>
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-5 w-5 text-primary" />
+                      Dados dos Vídeos (limpos, sem acentos ou caracteres especiais)
+                    </>
+                  )}
+                </Label>
                 <Textarea
                   id="competitor-data"
-                  placeholder={`Cole aqui os dados dos vídeos, exemplo:\n\nThese Historical Pictures Tell Stories Beyond Words\n857 visualizações | há 5 horas | 166 VPH\n\n120 BANNED Photos That Reveal What Was Never Meant to Be Seen\n2,5 mil visualizações | há 1 dia | 61 VPH`}
+                  placeholder={`Cole aqui os títulos LIMPOS do PASSO 1:
+
+My Mom Said I Wish You Were Never Born
+857 visualizacoes
+ha 5 horas
+166 VPH
+
+120 BANNED Photos That Reveal What Was Never Meant to Be Seen
+2500 visualizacoes
+ha 1 dia
+61 VPH`}
                   value={competitorData}
                   onChange={(e) => setCompetitorData(e.target.value)}
-                  className="min-h-[300px] font-mono text-sm"
+                  className={cn(
+                    "min-h-[300px] font-mono text-sm",
+                    getSpecialCharacterWarning(competitorData) && "border-red-500 bg-red-500/5"
+                  )}
                 />
                 {competitorData && (
                   <p className="text-sm text-muted-foreground">
@@ -846,18 +1096,27 @@ const SubNicheHunter = () => {
 
               <Button 
                 onClick={analyzeCompetitorTitles}
-                disabled={loading1 || !competitorData.trim()}
+                disabled={
+                  loading1 || 
+                  !competitorData.trim() || 
+                  hasSpecialCharacters(competitorData)
+                }
                 className="w-full"
                 size="lg"
               >
                 {loading1 ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     Analisando...
+                  </>
+                ) : hasSpecialCharacters(competitorData) ? (
+                  <>
+                    <XCircle className="mr-2 h-5 w-5" />
+                    Limpe os títulos no PASSO 1 primeiro
                   </>
                 ) : (
                   <>
-                    <Target className="mr-2 h-4 w-4" />
+                    <Sparkles className="mr-2 h-5 w-5" />
                     Analisar Sub-Nichos
                   </>
                 )}
