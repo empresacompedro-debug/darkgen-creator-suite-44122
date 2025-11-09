@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { UserManual } from "@/components/translator/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import { ImportRecentDialog } from "@/components/srt/ImportRecentDialog";
+import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 const TradutorRoteiros = () => {
   const { toast } = useToast();
@@ -20,7 +21,7 @@ const TradutorRoteiros = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [script, setScript] = useState("");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["en"]);
-  const [aiModel, setAiModel] = useState("gemini-2.5-flash");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [history, setHistory] = useState<any[]>([]);
   const [viewingHistory, setViewingHistory] = useState<any>(null);
@@ -188,22 +189,10 @@ const TradutorRoteiros = () => {
 
           <div className="space-y-2">
             <Label htmlFor="ai-model">Modelo de IA</Label>
-            <Select value={aiModel} onValueChange={setAiModel}>
-              <SelectTrigger id="ai-model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude-sonnet-4">Anthropic Claude Sonnet 4</SelectItem>
-                <SelectItem value="claude-sonnet-4.5">Anthropic Claude Sonnet 4.5</SelectItem>
-                <SelectItem value="claude-sonnet-3.5">Anthropic Claude Sonnet 3.5</SelectItem>
-                <SelectItem value="gemini-2.5-pro">Google Gemini 2.5 Pro</SelectItem>
-                <SelectItem value="gemini-2.5-flash">Google Gemini 2.5 Flash</SelectItem>
-                <SelectItem value="gemini-2.5-flash-lite">Google Gemini 2.5 Flash Lite</SelectItem>
-                <SelectItem value="gpt-4o">OpenAI GPT-4o</SelectItem>
-                <SelectItem value="gpt-4-turbo">OpenAI GPT-4 Turbo</SelectItem>
-                <SelectItem value="gpt-3.5-turbo">OpenAI GPT-3.5 Turbo</SelectItem>
-              </SelectContent>
-            </Select>
+            <AIModelSelector 
+              value={aiModel} 
+              onChange={setAiModel}
+            />
           </div>
 
           <Button
