@@ -697,10 +697,14 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       console.log(`✅ Usando chave do usuário para Kimi`);
 
       // Kimi usa endpoint compatível com OpenAI (tentar .ai e fallback para .cn)
+      const kimiModel = aiModel === 'kimi-k2-thinking' ? 'kimi-k2-thinking' : 'kimi-k2-turbo-preview';
       const kimiPayload = {
-        model: 'kimi-k2-0905', // Kimi K2 Thinking
-        max_tokens: 16000,
-        messages: [{ role: 'user', content: prompt }]
+        model: kimiModel,
+        messages: [
+          { role: 'system', content: 'You are Kimi, an AI assistant provided by Moonshot AI. Reply ONLY with valid JSON.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 8192,
       };
 
       let response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
