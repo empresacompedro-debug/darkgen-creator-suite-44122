@@ -84,7 +84,37 @@ Responda de forma clara, organizada e valiosa.`;
         provider: 'anthropic' | 'google' | 'openai';
         apiKey: string;
         model: string;
+        keyId?: string;
       }> = [];
+
+      // Helper para buscar chave OpenAI do usuário com descriptografia
+      const getUserOpenAIKey = async (): Promise<{ key: string; id: string } | null> => {
+        if (!userId) return null;
+        const { data: keys, error } = await supabase
+          .from('user_api_keys')
+          .select('id, api_key_encrypted, is_active, priority, is_current')
+          .eq('user_id', userId)
+          .eq('api_provider', 'openai')
+          .eq('is_active', true)
+          .order('is_current', { ascending: false })
+          .order('priority', { ascending: true })
+          .limit(1);
+        if (error) {
+          console.error('[brainstorm-battle] Erro ao buscar chaves OpenAI:', error);
+          return null;
+        }
+        if (!keys || keys.length === 0) return null;
+        const k = keys[0];
+        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted: k.api_key_encrypted,
+          p_user_id: userId,
+        });
+        if (decErr || !decrypted) {
+          console.error('[brainstorm-battle] Erro ao descriptografar chave OpenAI:', decErr);
+          return null;
+        }
+        return { key: decrypted as string, id: k.id };
+      };
 
       // Detectar apenas IAs selecionadas pelo usuário
       for (const modelId of selectedModels) {
@@ -106,17 +136,38 @@ Responda de forma clara, organizada e valiosa.`;
         }
 
         try {
-          const keyData = await getApiKey(userId || undefined, providerKey, supabase);
-          if (keyData) {
-            availableModels.push({
-              name: modelId,
-              provider,
-              apiKey: keyData.key,
-              model: modelId
-            });
-            console.log(`✓ ${modelId} available (${provider})`);
+          // Para OpenAI, usar sistema de retry/rotation
+          if (provider === 'openai') {
+            const keyInfo = await getUserOpenAIKey();
+            const envKey = Deno.env.get('OPENAI_API_KEY');
+            const finalKey = keyInfo?.key || envKey;
+            
+            if (finalKey) {
+              availableModels.push({
+                name: modelId,
+                provider,
+                apiKey: finalKey,
+                model: modelId,
+                keyId: keyInfo?.id
+              });
+              console.log(`✓ ${modelId} available (openai) - usando ${keyInfo ? 'chave do usuário' : 'chave global'}`);
+            } else {
+              console.log(`✗ ${modelId} skipped - no API key`);
+            }
           } else {
-            console.log(`✗ ${modelId} skipped - no API key`);
+            // Para Claude e Gemini, usar getApiKey helper
+            const keyData = await getApiKey(userId || undefined, providerKey, supabase);
+            if (keyData) {
+              availableModels.push({
+                name: modelId,
+                provider,
+                apiKey: keyData.key,
+                model: modelId
+              });
+              console.log(`✓ ${modelId} available (${provider})`);
+            } else {
+              console.log(`✗ ${modelId} skipped - no API key`);
+            }
           }
         } catch (error) {
           console.error(`Error getting key for ${modelId}:`, error);
@@ -140,7 +191,7 @@ Responda de forma clara, organizada e valiosa.`;
           const encoder = new TextEncoder();
           
           // Iniciar todas as chamadas simultaneamente
-          const streamPromises = availableModels.map(async ({ name, provider, model, apiKey }) => {
+          const streamPromises = availableModels.map(async ({ name, provider, model, apiKey, keyId }) => {
             try {
               let apiUrl = '';
               let headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -187,7 +238,50 @@ Responda de forma clara, organizada e valiosa.`;
                 body: JSON.stringify(requestBody)
               });
               
-              if (!response.ok || !response.body) return;
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`[brainstorm-battle] ${name} API error ${response.status}:`, errorText);
+                
+                // Se for OpenAI com erro 429 e tiver keyId, marcar como esgotada
+                if (response.status === 429 && provider === 'openai' && keyId && userId) {
+                  try {
+                    const supabaseAdmin = createClient(
+                      Deno.env.get('SUPABASE_URL')!,
+                      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+                    );
+                    await supabaseAdmin
+                      .from('user_api_keys')
+                      .update({
+                        is_active: false,
+                        is_current: false,
+                        quota_status: { exceeded: true, exceeded_at: new Date().toISOString() },
+                      })
+                      .eq('id', keyId);
+                    console.log(`[brainstorm-battle] ${name} chave marcada como esgotada`);
+                  } catch (rotErr) {
+                    console.error(`[brainstorm-battle] Erro ao marcar chave como esgotada:`, rotErr);
+                  }
+                }
+                return;
+              }
+              
+              if (!response.body) return;
+              
+              // Atualizar uso da chave se for OpenAI do usuário
+              if (provider === 'openai' && keyId && userId) {
+                try {
+                  const supabaseAdmin = createClient(
+                    Deno.env.get('SUPABASE_URL')!,
+                    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+                  );
+                  await supabaseAdmin
+                    .from('user_api_keys')
+                    .update({ last_used_at: new Date().toISOString(), is_current: true })
+                    .eq('id', keyId);
+                } catch (updateErr) {
+                  console.error(`[brainstorm-battle] Erro ao atualizar uso da chave:`, updateErr);
+                }
+              }
               
               const reader = response.body.getReader();
               const decoder = new TextDecoder();
