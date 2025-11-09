@@ -871,6 +871,13 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
         const char = repaired[i];
         const nextChar = repaired[i + 1] || '';
         
+        if (inString) {
+          // Normaliza quebras de linha e tabs dentro de strings
+          if (char === '\n') { result += '\\n'; prevChar = char; continue; }
+          if (char === '\r') { result += '\\r'; prevChar = char; continue; }
+          if (char === '\t') { result += '\\t'; prevChar = char; continue; }
+        }
+        
         if (char === '"' && prevChar !== '\\') {
           // Se encontramos uma aspas não escapada
           if (!inString) {
@@ -888,7 +895,7 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
               result += char;
             } else {
               // Aspas interna que precisa ser escapada
-              console.log(`🔧 Escapando aspas na posição ${i}: contexto="${repaired.substring(i-10, i+10)}"`);
+              // Ex.: ...Said "No"...
               result += '\\"';
             }
           }
