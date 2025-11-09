@@ -207,6 +207,7 @@ IMPORTANTE:
         },
         body: JSON.stringify({
           contents: [{
+            role: 'user',
             parts: [{
               text: prompt,
             }],
@@ -227,17 +228,32 @@ IMPORTANTE:
       const data = await response.json();
       console.log('Gemini response received:', JSON.stringify(data, null, 2));
       
-      if (!data.candidates || !data.candidates[0]) {
+      const candidate = data?.candidates?.[0];
+      if (!candidate) {
         console.error('Invalid Gemini response structure:', data);
         throw new Error('Invalid Gemini API response: missing candidates');
       }
-      
-      if (!data.candidates[0].content || !data.candidates[0].content.parts || !data.candidates[0].content.parts[0]) {
-        console.error('Invalid Gemini content structure:', data.candidates[0]);
-        throw new Error('Invalid Gemini API response: missing content parts');
+
+      let markdownReport = '';
+      const parts = candidate?.content?.parts;
+      if (Array.isArray(parts) && parts.length > 0) {
+        markdownReport = parts
+          .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? '')))
+          .join('');
+      } else if (typeof (candidate as any).text === 'string') {
+        markdownReport = (candidate as any).text;
+      }
+      if (!markdownReport && typeof (data as any).text === 'string') {
+        markdownReport = (data as any).text;
+      }
+
+      if (!markdownReport || !markdownReport.trim()) {
+        const finishReason = (candidate as any)?.finishReason ?? data?.promptFeedback?.blockReason ?? 'unknown';
+        const safety = (candidate as any)?.safetyRatings ?? data?.promptFeedback?.safetyRatings;
+        console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
+        throw new Error('Gemini não retornou texto (possível bloqueio de segurança). Tente ajustar o prompt ou reduzir os dados.');
       }
       
-      const markdownReport = data.candidates[0].content.parts[0].text;
       analysis = { markdownReport };
       
     } else if (aiModel.includes('gpt')) {
