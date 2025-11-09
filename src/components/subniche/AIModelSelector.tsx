@@ -1,7 +1,8 @@
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Zap } from "lucide-react";
+import { Sparkles, Zap, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface AIModelSelectorProps {
   value: string;
@@ -19,7 +20,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Modelo mais avançado - Requer API key",
       requiresKey: true,
       recommended: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 800
     },
     { 
       id: "claude-sonnet-4", 
@@ -27,7 +29,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "Anthropic",
       description: "Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 600
     },
     { 
       id: "claude-sonnet-3.7", 
@@ -35,7 +38,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "Anthropic",
       description: "Extended thinking - Raciocínio profundo - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 600
     },
     // Modelos Gemini
     { 
@@ -44,7 +48,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "Google",
       description: "Modelo avançado do Google - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 100
     },
     { 
       id: "gemini-2.5-flash", 
@@ -52,7 +57,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "Google",
       description: "Rápido e eficiente - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 150
     },
     { 
       id: "gemini-2.5-flash-lite", 
@@ -60,7 +66,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "Google",
       description: "Ultra rápido e leve - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 60
     },
     // Modelos OpenAI
     { 
@@ -69,7 +76,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 500
     },
     // ========== NOVOS MODELOS GPT 2025 ==========
     { 
@@ -78,7 +86,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Flagship 2025 - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 1000
     },
     { 
       id: "gpt-5-mini-2025-08-07", 
@@ -86,7 +95,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Rápido e eficiente - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 1200
     },
     { 
       id: "gpt-5-nano-2025-08-07", 
@@ -94,7 +104,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Ultra rápido - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 1500
     },
     { 
       id: "gpt-4.1-2025-04-14", 
@@ -102,7 +113,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "GPT-4 atualizado - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 600
     },
     { 
       id: "gpt-4.1-mini-2025-04-14", 
@@ -110,7 +122,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "GPT-4 leve - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 600
     },
     { 
       id: "o3-2025-04-16", 
@@ -118,7 +131,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Raciocínio avançado - Requer API key",
       requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 1000
     },
     { 
       id: "o4-mini-2025-04-16", 
@@ -126,7 +140,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Raciocínio rápido - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 1000
     },
     { 
       id: "gpt-4o-mini", 
@@ -134,7 +149,8 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       provider: "OpenAI",
       description: "Legacy leve - Requer API key",
       requiresKey: true,
-      icon: <Zap className="h-3 w-3" />
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 500
     }
   ];
 
@@ -152,6 +168,18 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
               {selectedModel?.recommended && (
                 <Badge variant="secondary" className="text-xs">Recomendado</Badge>
               )}
+              {selectedModel && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3 w-3 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="text-xs font-semibold">Capacidade: até {selectedModel.maxVideos} vídeos</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
           </SelectValue>
         </SelectTrigger>
@@ -164,6 +192,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
                   <div className="flex flex-col">
                     <span className="font-medium">{model.name}</span>
                     <span className="text-xs text-muted-foreground">{model.description}</span>
+                    <span className="text-[10px] text-muted-foreground/70 font-mono">Máx: {model.maxVideos} vídeos</span>
                   </div>
                 </div>
                 <div className="flex items-center gap-1">

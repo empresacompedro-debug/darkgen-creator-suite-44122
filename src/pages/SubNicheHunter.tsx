@@ -416,6 +416,29 @@ const SubNicheHunter = () => {
     }
   };
 
+  // Função para verificar se o modelo escolhido suporta a quantidade de vídeos
+  const getModelMaxVideos = (modelId: string): number => {
+    const limits: { [key: string]: number } = {
+      'google/gemini-2.5-pro': 100,
+      'google/gemini-2.5-flash': 150,
+      'google/gemini-2.5-flash-lite': 60,
+      'openai/gpt-5': 1000,
+      'openai/gpt-5-mini': 1200,
+      'openai/gpt-5-nano': 1500,
+      'claude-sonnet-4.5': 800,
+      'claude-sonnet-4': 600,
+      'gpt-4.1': 600,
+      'gpt-4o': 500
+    };
+    return limits[modelId] || 450;
+  };
+
+  const countVideosInData = (data: string): number => {
+    // Contar quantos vídeos existem nos dados (cada linha com visualizações)
+    const lines = data.split('\n').filter(line => line.trim());
+    return lines.filter(line => /\d+/.test(line)).length;
+  };
+
   const analyzeCompetitorTitles = async () => {
     if (!competitorData.trim()) {
       toast({
@@ -433,6 +456,19 @@ const SubNicheHunter = () => {
         variant: "destructive",
       });
       return;
+    }
+
+    // Verificar se o modelo suporta a quantidade de vídeos
+    const videoCount = countVideosInData(competitorData);
+    const maxVideos = getModelMaxVideos(selectedAIModel);
+    
+    if (videoCount > maxVideos) {
+      toast({
+        title: "⚠️ Muitos vídeos para este modelo",
+        description: `${videoCount} vídeos detectados, mas "${selectedAIModel.split('/')[1]}" suporta apenas ${maxVideos}. Apenas os primeiros ${maxVideos} serão analisados. Para analisar todos, use GPT-5 (1000), GPT-5 Mini (1200) ou GPT-5 Nano (1500).`,
+        variant: "default",
+        duration: 8000,
+      });
     }
 
     setLoading1(true);

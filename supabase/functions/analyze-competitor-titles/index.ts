@@ -186,23 +186,52 @@ serve(async (req) => {
 
     // Helper: Define limite de vídeos baseado na capacidade do modelo
     function getMaxVideosForModel(model: string): number {
-      // Gemini 2.5: Usa "thinking tokens" internos, então precisa de limite muito menor
-      // Com 68 vídeos, usou 15,999 thinking tokens + 4,453 prompt = 20,452 total
-      if (model.includes('gemini-2.5')) {
-        return 40;  // Limite reduzido drasticamente por causa dos thinking tokens
+      // Gemini 2.5: THINKING TOKENS consomem 3-4x mais contexto
+      // Teste real: 68 vídeos = 20,452 tokens (4,453 prompt + 15,999 thinking)
+      // Cada vídeo consome ~300 tokens efetivos (com thinking)
+      if (model.includes('gemini-2.5-pro')) {
+        return 100;  // Conservador para Pro (1M context)
+      }
+      if (model.includes('gemini-2.5-flash') && !model.includes('lite')) {
+        return 150;  // Flash é mais eficiente (1M context)
+      }
+      if (model.includes('gemini-2.5-flash-lite')) {
+        return 60;   // Lite tem apenas 128K contexto
       }
       
-      // Claude Sonnet, GPT-5, O3, O4: 200K tokens = ~600 vídeos
-      if (model.includes('claude-sonnet') || model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-')) {
+      // GPT-5: 256K contexto via API, excelente para grandes volumes
+      // Sem thinking tokens overhead - cada vídeo consome apenas ~25 tokens
+      if (model.startsWith('gpt-5-nano')) {
+        return 1500; // Mais rápido e eficiente
+      }
+      if (model.startsWith('gpt-5-mini')) {
+        return 1200; // Ótimo custo-benefício
+      }
+      if (model.startsWith('gpt-5')) {
+        return 1000; // Modelo principal
+      }
+      
+      // O3 / O4: Mesma capacidade do GPT-5
+      if (model.startsWith('o3-') || model.startsWith('o4-')) {
+        return 1000;
+      }
+      
+      // Claude Sonnet: 200K contexto, muito estável
+      if (model.includes('claude-sonnet-4.5')) {
+        return 800;  // Versão mais recente e otimizada
+      }
+      if (model.includes('claude-sonnet')) {
+        return 600;  // Versões anteriores
+      }
+      
+      // GPT-4.1: 128K contexto
+      if (model.includes('gpt-4.1')) {
         return 600;
       }
       
-      // Kimi K2: Limite reduzido para 30 vídeos para evitar crash da edge function
-      // REMOVIDO - Kimi não é mais suportado
-      
-      // GPT-4.1, GPT-4o: 128K tokens = ~450 vídeos
-      if (model.includes('gpt-4')) {
-        return 450;
+      // GPT-4o: 128K contexto (legacy)
+      if (model.includes('gpt-4o')) {
+        return 500;
       }
       
       // Fallback seguro
@@ -215,8 +244,29 @@ serve(async (req) => {
     let videosToAnalyze = videos;
 
     if (videos.length > maxVideosForPrompt) {
-      console.log(`⚠️ Total de ${videos.length} vídeos excede limite de ${maxVideosForPrompt} do modelo "${aiModel}"`);
-      console.log(`📊 Selecionando top ${maxVideosForPrompt} vídeos por views para análise otimizada`);
+      console.log(`⚠️ AVISO: ${videos.length} vídeos excedem o limite de ${maxVideosForPrompt} do modelo "${aiModel}"`);
+      console.log(`📊 Processando apenas os primeiros ${maxVideosForPrompt} vídeos`);
+      console.log(`💡 DICA: Para processar todos os ${videos.length} vídeos, use um destes modelos:`);
+      
+      if (videos.length <= 150) {
+        console.log(`   ✅ Gemini 2.5 Flash: até 150 vídeos`);
+      }
+      if (videos.length <= 600) {
+        console.log(`   ✅ GPT-4.1: até 600 vídeos`);
+        console.log(`   ✅ Claude Sonnet 4: até 600 vídeos`);
+      }
+      if (videos.length <= 800) {
+        console.log(`   ✅ Claude Sonnet 4.5: até 800 vídeos`);
+      }
+      if (videos.length <= 1000) {
+        console.log(`   ✅ GPT-5: até 1,000 vídeos (recomendado para grandes volumes)`);
+      }
+      if (videos.length <= 1200) {
+        console.log(`   ✅ GPT-5 Mini: até 1,200 vídeos (ótimo custo-benefício)`);
+      }
+      if (videos.length > 1200) {
+        console.log(`   ✅ GPT-5 Nano: até 1,500 vídeos (máxima capacidade)`);
+      }
       
       // Ordena por views (maior para menor) e pega os top N
       videosToAnalyze = [...videos]
