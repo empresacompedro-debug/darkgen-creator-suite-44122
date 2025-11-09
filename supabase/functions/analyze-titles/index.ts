@@ -16,7 +16,19 @@ serve(async (req) => {
   }
 
   try {
-    const { rawData, aiModel = 'claude-sonnet-4-5' } = await req.json();
+    let { rawData, aiModel = 'claude-sonnet-4-5' } = await req.json();
+
+    // Map old/invalid model names to valid ones
+    const modelMapping: Record<string, string> = {
+      'claude-3-5-sonnet-20241022': 'claude-sonnet-4-5',
+      'claude-3-opus-20240229': 'claude-opus-4-1-20250805',
+      'claude-3-sonnet-20240229': 'claude-sonnet-4-5',
+    };
+    
+    if (modelMapping[aiModel]) {
+      console.log(`Mapping old model ${aiModel} to ${modelMapping[aiModel]}`);
+      aiModel = modelMapping[aiModel];
+    }
 
     console.log('Received request with model:', aiModel);
     console.log('Raw data length:', rawData?.length);
