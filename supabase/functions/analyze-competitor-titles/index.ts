@@ -707,25 +707,60 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
         max_tokens: 8192,
       };
 
-      let response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(kimiPayload)
-      });
-
-      if (!response.ok && (response.status === 404 || response.status === 401)) {
-        console.warn(`⚠️ Kimi (.ai) retornou ${response.status}. Tentando domínio .cn...`);
-        response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+      console.log(`📤 Enviando para Kimi (modelo: ${kimiModel}, prompt size: ${prompt.length} chars)`);
+      
+      // Configurar timeout de 120 segundos
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
+      
+      let response: Response;
+      
+      try {
+        const startTime = Date.now();
+        
+        response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(kimiPayload)
+          body: JSON.stringify(kimiPayload),
+          signal: controller.signal
         });
+
+        const elapsed = Date.now() - startTime;
+        console.log(`⏱️ Kimi (.ai) respondeu em ${elapsed}ms com status ${response.status}`);
+
+        // Fallback para domínio .cn se necessário
+        if (!response.ok && (response.status === 404 || response.status === 401 || response.status === 403)) {
+          console.warn(`⚠️ Kimi (.ai) retornou ${response.status}. Tentando domínio .cn...`);
+          
+          const startTimeCn = Date.now();
+          response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(kimiPayload),
+            signal: controller.signal
+          });
+          
+          const elapsedCn = Date.now() - startTimeCn;
+          console.log(`⏱️ Kimi (.cn) respondeu em ${elapsedCn}ms com status ${response.status}`);
+        }
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+          console.error('⏱️ Timeout na API do Kimi após 120 segundos');
+          throw new Error('❌ A API do Kimi demorou muito para responder (timeout após 2 minutos). Tente: 1) Reduzir a quantidade de títulos, 2) Usar outro modelo de IA, ou 3) Tentar novamente em alguns minutos.');
+        }
+        
+        console.error('❌ Erro ao conectar com Kimi:', error.message);
+        throw new Error(`❌ Erro ao conectar com a API do Kimi: ${error.message}. Verifique sua conexão ou tente outro modelo.`);
+      } finally {
+        clearTimeout(timeoutId);
       }
 
       if (!response.ok) {
