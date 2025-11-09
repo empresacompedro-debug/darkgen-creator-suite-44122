@@ -696,24 +696,37 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       const apiKey = apiKeyResult.key;
       console.log(`✅ Usando chave do usuário para Kimi`);
 
-      // Kimi usa endpoint compatível com OpenAI
-      const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+      // Kimi usa endpoint compatível com OpenAI (tentar .ai e fallback para .cn)
+      const kimiPayload = {
+        model: 'kimi-k2-0905', // Kimi K2 Thinking
+        max_tokens: 16000,
+        messages: [{ role: 'user', content: prompt }]
+      };
+
+      let response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          model: 'moonshot-v1-128k',
-          max_tokens: 16000,
-          messages: [{ role: 'user', content: prompt }]
-        })
+        body: JSON.stringify(kimiPayload)
       });
+
+      if (!response.ok && (response.status === 404 || response.status === 401)) {
+        console.warn(`⚠️ Kimi (.ai) retornou ${response.status}. Tentando domínio .cn...`);
+        response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(kimiPayload)
+        });
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ Erro Kimi API:', errorText);
-        
         if (response.status === 401) {
           throw new Error('❌ API Key do Kimi inválida. Verifique sua chave em Configurações.');
         }
