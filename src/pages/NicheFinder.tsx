@@ -407,15 +407,16 @@ const NicheFinder = () => {
   const applyFilters = () => {
     console.log('🔧 Aplicando filtros temporários:', tempFilters);
     
-    // Calcular preview correto ANTES de atualizar o estado
     const previewFilters = {
       channelAgeMin: tempFilters.channelAgeMin,
       channelAgeMax: tempFilters.channelAgeMax,
       subscribersMin: tempFilters.subscribersMin,
       subscribersMax: tempFilters.subscribersMax
     };
-    
-    const preview = results.filter(video => {
+
+    // Remover duplicados por ID antes de pré-visualizar
+    const unique = Array.from(new Map(results.map((v) => [v.id, v])).values());
+    const preview = unique.filter(video => {
       const channelAge = video.channelAgeInDays;
       if (channelAge === null || channelAge === undefined) return false;
       const subs = video.subscriberCount || 0;
@@ -432,7 +433,7 @@ const NicheFinder = () => {
     
     toast({
       title: "✅ Filtros Aplicados",
-      description: `${preview.length} vídeos encontrados de ${results.length} totais`
+      description: `${preview.length} vídeos encontrados de ${unique.length} únicos`
     });
   };
 
@@ -478,9 +479,10 @@ const NicheFinder = () => {
     return sorted;
   };
 
-  // Usar useMemo para otimizar e garantir atualização correta
+  // Usar useMemo para otimizar e garantir atualização correta + remover duplicados por ID
   const filteredAndSortedResults = useMemo(() => {
-    return applyPostFilters(sortResults(results));
+    const unique = Array.from(new Map(results.map((v) => [v.id, v])).values());
+    return applyPostFilters(sortResults(unique));
   }, [results, postFilters, sortConfig]);
 
   return (
@@ -700,16 +702,19 @@ const NicheFinder = () => {
                   onClick={() => {
                     console.log('🔍 DEBUG - Todos os vídeos:', results);
                     console.log('🔍 DEBUG - Filtros atuais:', postFilters);
-                    console.log('🔍 DEBUG - Vídeos filtrados:', filteredAndSortedResults);
+                    const unique = Array.from(new Map(results.map((v) => [v.id, v])).values());
+                    console.log('🔍 DEBUG - Total resultados (brutos):', results.length);
+                    console.log('🔍 DEBUG - Total resultados (únicos):', unique.length);
+                    const filteredPreview = applyPostFilters(sortResults(unique));
+                    console.log('🔍 DEBUG - Vídeos filtrados (após ordenação+filtro):', filteredPreview.length);
                     
-                    // Mostrar detalhes de cada vídeo
-                    results.forEach((video, i) => {
-                      console.log(`[${i}] ${video.title?.substring(0, 50)} - Idade: ${video.channelAgeInDays}d - Subs: ${video.subscriberCount}`);
+                    unique.forEach((video, i) => {
+                      console.log(`[${i}] ${video.title?.substring(0, 50)} - Idade Canal: ${video.channelAgeInDays}d - Subs: ${video.subscriberCount}`);
                     });
                     
                     toast({
                       title: "🐛 Debug Info",
-                      description: `Dados impressos no console do navegador (F12)`,
+                      description: `Brutos: ${results.length} • Únicos: ${unique.length} • Filtrados: ${filteredPreview.length}`,
                     });
                   }}
                 >
@@ -817,6 +822,7 @@ const NicheFinder = () => {
                               type="number"
                               min={0}
                               max={3650}
+                              step={1}
                               value={tempFilters.channelAgeMin}
                               onChange={(e) => setTempFilters({ ...tempFilters, channelAgeMin: Number(e.target.value) })}
                               placeholder="0"
@@ -828,6 +834,7 @@ const NicheFinder = () => {
                               type="number"
                               min={0}
                               max={3650}
+                              step={1}
                               value={tempFilters.channelAgeMax}
                               onChange={(e) => setTempFilters({ ...tempFilters, channelAgeMax: Number(e.target.value) })}
                               placeholder="3650"
@@ -849,6 +856,7 @@ const NicheFinder = () => {
                               type="number"
                               min={0}
                               max={10000000}
+                              step={1}
                               value={tempFilters.subscribersMin}
                               onChange={(e) => setTempFilters({ ...tempFilters, subscribersMin: Number(e.target.value) })}
                               placeholder="0"
@@ -860,6 +868,7 @@ const NicheFinder = () => {
                               type="number"
                               min={0}
                               max={10000000}
+                              step={1}
                               value={tempFilters.subscribersMax}
                               onChange={(e) => setTempFilters({ ...tempFilters, subscribersMax: Number(e.target.value) })}
                               placeholder="5000000"
