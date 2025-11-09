@@ -85,12 +85,12 @@ Retorne o roteiro completo melhorado:`;
         if (aiModel.startsWith('claude')) {
           apiUrl = 'https://api.anthropic.com/v1/messages';
           const modelMap: Record<string, string> = {
-            'claude-sonnet-4': 'claude-3-5-sonnet-20241022',
-            'claude-sonnet-4.5': 'claude-3-5-sonnet-20241022',
-            'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
+            'claude-sonnet-4': 'claude-3-5-sonnet-20240620',
+            'claude-sonnet-4.5': 'claude-3-5-sonnet-20240620',
+            'claude-sonnet-3.5': 'claude-3-5-sonnet-20240620'
           };
           requestBody = {
-            model: modelMap[aiModel] || 'claude-3-5-sonnet-20241022',
+            model: modelMap[aiModel] || 'claude-3-5-sonnet-20240620',
             max_tokens: 16000,
             messages: [{ role: 'user', content: prompt }]
           };

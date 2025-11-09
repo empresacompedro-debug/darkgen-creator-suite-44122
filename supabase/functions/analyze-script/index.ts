@@ -102,11 +102,11 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
       
       apiUrl = 'https://api.anthropic.com/v1/messages';
       const modelMap: Record<string, string> = {
-        'claude-sonnet-4': 'claude-3-5-sonnet-20241022',
-        'claude-sonnet-4.5': 'claude-3-5-sonnet-20241022',
-        'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
+        'claude-sonnet-4': 'claude-3-5-sonnet-20240620',
+        'claude-sonnet-4.5': 'claude-3-5-sonnet-20240620',
+        'claude-sonnet-3.5': 'claude-3-5-sonnet-20240620'
       };
-      const finalModel = modelMap[aiModel] || 'claude-3-5-sonnet-20241022';
+      const finalModel = modelMap[aiModel] || 'claude-3-5-sonnet-20240620';
       const maxTokens = getMaxTokensForModel(finalModel);
       console.log(`📦 [analyze-script] Usando ${maxTokens} max_tokens para ${finalModel}`);
       
