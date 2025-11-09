@@ -2,3 +2,6 @@ project_id = "fmtikdkgfmumbqjndbss"
 
 [functions.setup-first-admin]
 verify_jwt = true
+
+[functions.analyze-titles]
+verify_jwt = false
