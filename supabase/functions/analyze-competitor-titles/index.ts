@@ -281,7 +281,7 @@ serve(async (req) => {
     const prompt = `Você é um especialista ULTRA-ESPECIALIZADO em análise de nichos de conteúdo no YouTube.
 
 DADOS DOS VÍDEOS (${videosToAnalyze.length} vídeos${videos.length > videosToAnalyze.length ? ` - top ${videosToAnalyze.length} de ${videos.length} total` : ''}):
-${videosToAnalyze.map((v, i) => `${i + 1}. "${v.title}" | ${v.views.toLocaleString()} views`).join('\n')}
+${videosToAnalyze.map((v, i) => `${i + 1}. "${v.title.replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g,' ').trim()}" | ${v.views.toLocaleString()} views`).join('\n')}
 
 ═══════════════════════════════════════════════════════════════
 🎯 FORMATO DE RESPOSTA OBRIGATÓRIO
@@ -899,181 +899,15 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
     console.log('🧹 JSON limpo (primeiros 500 chars):', resultText.slice(0, 500));
     console.log('🧹 JSON limpo (últimos 200 chars):', resultText.slice(-200));
     
-    // Função helper para reparar JSON truncado/malformado
-    function repairJSON(jsonStr: string): string {
-      let repaired = jsonStr;
-      
-      // NOVO: Escapar aspas não escapadas dentro de valores de string JSON
-      // Processa caractere por caractere para identificar aspas dentro de strings
-      console.log('🔧 Iniciando reparo de aspas não escapadas...');
-      let result = '';
-      let inString = false;
-      let prevChar = '';
-      
-      for (let i = 0; i < repaired.length; i++) {
-        const char = repaired[i];
-        const nextChar = repaired[i + 1] || '';
-        
-        if (inString) {
-          // Normaliza quebras de linha e tabs dentro de strings
-          if (char === '\n') { result += '\\n'; prevChar = char; continue; }
-          if (char === '\r') { result += '\\r'; prevChar = char; continue; }
-          if (char === '\t') { result += '\\t'; prevChar = char; continue; }
-        }
-        
-        if (char === '"' && prevChar !== '\\') {
-          // Se encontramos uma aspas não escapada
-          if (!inString) {
-            // Começando uma string
-            inString = true;
-            result += char;
-          } else {
-            // Procurar próximo caractere NÃO espaço para decidir se é fim de string
-            let j = i + 1;
-            while (j < repaired.length && /\s/.test(repaired[j])) j++;
-            const nextNonWs = repaired[j] || '';
-            const isEndOfString = nextNonWs === ',' || nextNonWs === '}' || nextNonWs === ']' || nextNonWs === ':';
-            
-            if (isEndOfString) {
-              // Fim real da string JSON
-              inString = false;
-              result += char;
-            } else {
-              // Aspas interna que precisa ser escapada (ex.: ...Said "No"...)
-              result += '\\"';
-            }
-          }
-        } else {
-          result += char;
-        }
-        
-        prevChar = char;
-      }
-      
-      // Se terminou ainda dentro de uma string, fecha a aspa para evitar truncamento
-      if (inString) {
-        result += '"';
-        inString = false;
-      }
-      
-      repaired = result;
-      console.log('✅ Reparo de aspas concluído');
-      
-      // Conta abertura e fechamento de arrays e objetos
-      const openBraces = (repaired.match(/{/g) || []).length;
-      const closeBraces = (repaired.match(/}/g) || []).length;
-      const openBrackets = (repaired.match(/\[/g) || []).length;
-      const closeBrackets = (repaired.match(/]/g) || []).length;
-      
-      console.log('🔧 Análise JSON:', { openBraces, closeBraces, openBrackets, closeBrackets });
-      
-      // Remove vírgulas antes de ] ou }
-      repaired = repaired.replace(/,(\s*[\]}])/g, '$1');
-      
-      // Remove trailing comma no final (antes do último })
-      repaired = repaired.replace(/,(\s*)$/, '$1');
-      
-      // Se há arrays/objetos abertos, tenta fechar
-      if (openBrackets > closeBrackets) {
-        const diff = openBrackets - closeBrackets;
-        console.log(`🔧 Fechando ${diff} arrays não fechados`);
-        repaired += ']'.repeat(diff);
-      }
-      
-      if (openBraces > closeBraces) {
-        const diff = openBraces - closeBraces;
-        console.log(`🔧 Fechando ${diff} objetos não fechados`);
-        repaired += '}'.repeat(diff);
-      }
-      
-      return repaired;
-    }
-    
-    // Fallback de auto-reparo via Lovable AI se o parse continuar falhando
-    async function aiRepairJSON(raw: string): Promise<string> {
-      try {
-        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-        if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY não configurada');
-
-        const payload = {
-          model: 'google/gemini-2.5-flash',
-          messages: [
-            { role: 'system', content: 'Você é um reparador ESTRITO de JSON. Responda APENAS com JSON válido. Sem markdown, sem comentários, sem texto antes/depois.' },
-            { role: 'user', content: `Repare o JSON malformado abaixo e retorne somente JSON válido.\n\n${raw}` }
-          ],
-        } as any;
-
-        const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-
-        if (!resp.ok) {
-          if (resp.status === 429) throw new Error('RATE_LIMIT: Limite de requisições do Lovable AI atingido');
-          if (resp.status === 402) throw new Error('NO_CREDITS: Sem créditos no Lovable AI');
-          const t = await resp.text();
-          console.error('❌ Erro no AI Gateway:', resp.status, t);
-          throw new Error('AI_GATEWAY_ERROR');
-        }
-
-        const data = await resp.json();
-        const content = data?.choices?.[0]?.message?.content ?? '';
-        let txt = String(content).trim();
-        // Limpeza básica: remover cercas de markdown e isolar entre chaves
-        txt = txt.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
-        const fb = txt.indexOf('{');
-        const lb = txt.lastIndexOf('}');
-        if (fb !== -1 && lb !== -1) {
-          return txt.slice(fb, lb + 1);
-        }
-        return txt;
-      } catch (e) {
-        console.error('❌ Falha no reparo via IA:', e);
-        throw e;
-      }
-    }
-    
+    // Parse direto sem reparo via IA
     let result;
     try {
       result = JSON.parse(resultText);
-      console.log('✅ JSON parseado com sucesso na primeira tentativa');
+      console.log('✅ JSON parseado com sucesso');
     } catch (parseError: any) {
-      console.log('⚠️ Primeira tentativa de parse falhou, tentando reparar JSON...');
-      console.error('📄 Erro:', parseError.message);
-      
-      try {
-        const repairedText = repairJSON(resultText);
-        console.log('🔧 JSON reparado (últimos 200 chars):', repairedText.slice(-200));
-        result = JSON.parse(repairedText);
-        console.log('✅ JSON parseado com sucesso após reparo');
-      } catch (repairError: any) {
-        console.error('❌ Erro ao fazer parse do JSON mesmo após reparo:', repairError.message);
-        console.error('📄 JSON completo que falhou:', resultText);
-        console.error('📄 Posição do erro:', repairError.message.match(/position (\d+)/)?.[1] || 'desconhecida');
-        
-        // Tenta identificar o problema específico
-        const errorPos = parseInt(repairError.message.match(/position (\d+)/)?.[1] || '0');
-        if (errorPos > 0) {
-          const context = resultText.substring(Math.max(0, errorPos - 100), Math.min(resultText.length, errorPos + 100));
-          console.error('📍 Contexto do erro:', context);
-        }
-        
-        // Fallback final: tentar auto-reparo via Lovable AI (uma única tentativa)
-        try {
-          console.log('🤖 Tentando reparo via Lovable AI...');
-          const aiFixed = await aiRepairJSON(resultText);
-          console.log('🤖 JSON reparado via IA (últimos 200 chars):', aiFixed.slice(-200));
-          result = JSON.parse(aiFixed);
-          console.log('✅ JSON parseado com sucesso após reparo via IA');
-        } catch (aiError: any) {
-          console.error('❌ Reparo via IA também falhou:', aiError?.message || aiError);
-          throw new Error(`Falha ao fazer parse da resposta: ${repairError.message}. Também falhou o reparo automático via IA (${aiError?.message || 'erro desconhecido'}). O modelo retornou um JSON malformado. Tente novamente, reduza o volume de dados ou selecione outro modelo.`);
-        }
-      }
+      console.error('❌ Falha ao fazer parse da resposta:', parseError?.message);
+      console.error('📄 JSON completo que falhou:', resultText);
+      throw new Error(`Falha ao fazer parse da resposta: ${parseError?.message || 'erro desconhecido'}`);
     }
     
     console.log('📊 Estrutura do resultado:', {
