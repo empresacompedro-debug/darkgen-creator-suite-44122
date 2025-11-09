@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -354,17 +354,33 @@ const NicheFinder = () => {
   };
 
   const applyPostFilters = (videos: any[]) => {
-    return videos.filter(video => {
-      const channelAge = video.channelAgeInDays || 0;
+    console.log('🔍 APLICANDO FILTROS:', postFilters);
+    console.log('📊 Total de vídeos antes do filtro:', videos.length);
+    
+    const filtered = videos.filter(video => {
+      // Validação rigorosa: se não tem channelAgeInDays, considerar inválido
+      const channelAge = video.channelAgeInDays;
+      if (channelAge === null || channelAge === undefined) {
+        console.warn('⚠️ Vídeo sem channelAgeInDays:', video.title?.substring(0, 50));
+        return false; // Não mostrar vídeos sem dados de idade
+      }
+      
       const subs = video.subscriberCount || 0;
       
-      return (
-        channelAge >= postFilters.channelAgeMin &&
-        channelAge <= postFilters.channelAgeMax &&
-        subs >= postFilters.subscribersMin &&
-        subs <= postFilters.subscribersMax
-      );
+      const agePass = channelAge >= postFilters.channelAgeMin && channelAge <= postFilters.channelAgeMax;
+      const subsPass = subs >= postFilters.subscribersMin && subs <= postFilters.subscribersMax;
+      const passes = agePass && subsPass;
+      
+      // Log detalhado apenas para vídeos filtrados (para não poluir console)
+      if (!passes) {
+        console.log(`❌ Filtrado: ${video.title?.substring(0, 50)}... - Idade: ${channelAge}d (${agePass ? '✅' : '❌'}) - Subs: ${subs} (${subsPass ? '✅' : '❌'})`);
+      }
+      
+      return passes;
     });
+    
+    console.log('✅ Total após filtro:', filtered.length);
+    return filtered;
   };
 
   const applyPreset = (preset: string) => {
@@ -389,10 +405,34 @@ const NicheFinder = () => {
   };
 
   const applyFilters = () => {
+    console.log('🔧 Aplicando filtros temporários:', tempFilters);
+    
+    // Calcular preview correto ANTES de atualizar o estado
+    const previewFilters = {
+      channelAgeMin: tempFilters.channelAgeMin,
+      channelAgeMax: tempFilters.channelAgeMax,
+      subscribersMin: tempFilters.subscribersMin,
+      subscribersMax: tempFilters.subscribersMax
+    };
+    
+    const preview = results.filter(video => {
+      const channelAge = video.channelAgeInDays;
+      if (channelAge === null || channelAge === undefined) return false;
+      const subs = video.subscriberCount || 0;
+      
+      return (
+        channelAge >= previewFilters.channelAgeMin &&
+        channelAge <= previewFilters.channelAgeMax &&
+        subs >= previewFilters.subscribersMin &&
+        subs <= previewFilters.subscribersMax
+      );
+    });
+    
     setPostFilters(tempFilters);
+    
     toast({
       title: "✅ Filtros Aplicados",
-      description: `${filteredAndSortedResults.length} vídeos encontrados`
+      description: `${preview.length} vídeos encontrados de ${results.length} totais`
     });
   };
 
@@ -438,7 +478,10 @@ const NicheFinder = () => {
     return sorted;
   };
 
-  const filteredAndSortedResults = applyPostFilters(sortResults(results));
+  // Usar useMemo para otimizar e garantir atualização correta
+  const filteredAndSortedResults = useMemo(() => {
+    return applyPostFilters(sortResults(results));
+  }, [results, postFilters, sortConfig]);
 
   return (
     <div className="space-y-8">
@@ -650,13 +693,36 @@ const NicheFinder = () => {
               <h2 className="text-2xl font-bold">
                 📊 Resultados ({results.length} vídeos)
               </h2>
-              <Button
-                onClick={() => exportToExcel(filteredAndSortedResults, 'niche-finder-resultados')}
-                variant="outline"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Exportar Excel
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    console.log('🔍 DEBUG - Todos os vídeos:', results);
+                    console.log('🔍 DEBUG - Filtros atuais:', postFilters);
+                    console.log('🔍 DEBUG - Vídeos filtrados:', filteredAndSortedResults);
+                    
+                    // Mostrar detalhes de cada vídeo
+                    results.forEach((video, i) => {
+                      console.log(`[${i}] ${video.title?.substring(0, 50)} - Idade: ${video.channelAgeInDays}d - Subs: ${video.subscriberCount}`);
+                    });
+                    
+                    toast({
+                      title: "🐛 Debug Info",
+                      description: `Dados impressos no console do navegador (F12)`,
+                    });
+                  }}
+                >
+                  🐛 Debug Filtros
+                </Button>
+                <Button
+                  onClick={() => exportToExcel(filteredAndSortedResults, 'niche-finder-resultados')}
+                  variant="outline"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Exportar Excel
+                </Button>
+              </div>
             </div>
 
             {/* Ordenação */}

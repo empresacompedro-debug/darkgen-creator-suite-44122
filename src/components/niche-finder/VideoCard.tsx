@@ -39,8 +39,9 @@ const formatChannelAge = (days: number): string => {
 };
 
 export function VideoCard({ video }: VideoCardProps) {
-  const channelAge = video.channelAgeInDays || 0;
-  const channelAgeCategory = getChannelAgeCategory(channelAge);
+  const channelAge = video.channelAgeInDays;
+  const hasChannelAge = channelAge !== null && channelAge !== undefined;
+  const channelAgeCategory = hasChannelAge ? getChannelAgeCategory(channelAge) : { label: "Desconhecido", color: "bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/20" };
   const subscriberCategory = getSubscriberCategory(video.subscriberCount || 0);
 
   return (
@@ -149,12 +150,25 @@ export function VideoCard({ video }: VideoCardProps) {
                 <Calendar className="h-4 w-4" />
                 <span className="text-xs font-semibold uppercase">Idade do Canal</span>
               </div>
-              <p className="text-xl font-bold mb-1">
-                {formatChannelAge(channelAge)}
-              </p>
-              <Badge variant="outline" className={`text-xs ${channelAgeCategory.color} border-0`}>
-                {channelAgeCategory.label}
-              </Badge>
+              {hasChannelAge ? (
+                <>
+                  <p className="text-xl font-bold mb-1">
+                    {formatChannelAge(channelAge)}
+                  </p>
+                  <Badge variant="outline" className={`text-xs ${channelAgeCategory.color} border-0`}>
+                    {channelAgeCategory.label}
+                  </Badge>
+                </>
+              ) : (
+                <>
+                  <p className="text-xl font-bold mb-1 text-muted-foreground">
+                    N/A
+                  </p>
+                  <Badge variant="destructive" className="text-xs">
+                    ⚠️ Dados não disponíveis
+                  </Badge>
+                </>
+              )}
             </div>
           </div>
 
