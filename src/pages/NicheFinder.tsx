@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Search, Loader2, Download, Save, FolderOpen, Trash2, Target, BookOpen } from "lucide-react";
+import { Search, Loader2, Download, Save, FolderOpen, Trash2, Target, BookOpen, Filter } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,6 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
+import { Slider } from "@/components/ui/slider";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 // Niche Finder with automatic API key rotation
 const NicheFinder = () => {
@@ -53,6 +55,14 @@ const NicheFinder = () => {
   const [showNicheLists, setShowNicheLists] = useState(false);
   const [aiModel, setAiModel] = useState("gemini-2.5-flash");
   const [maxPagesPerNiche, setMaxPagesPerNiche] = useState(10);
+
+  // Estados para filtros pós-busca
+  const [postFilters, setPostFilters] = useState({
+    channelAgeMin: 0,
+    channelAgeMax: 3650, // 10 anos
+    subscribersMin: 0,
+    subscribersMax: 5000000
+  });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -337,6 +347,37 @@ const NicheFinder = () => {
     }
   };
 
+  const applyPostFilters = (videos: any[]) => {
+    return videos.filter(video => {
+      const channelAge = video.channelAgeInDays || 0;
+      const subs = video.subscriberCount || 0;
+      
+      return (
+        channelAge >= postFilters.channelAgeMin &&
+        channelAge <= postFilters.channelAgeMax &&
+        subs >= postFilters.subscribersMin &&
+        subs <= postFilters.subscribersMax
+      );
+    });
+  };
+
+  const applyPreset = (preset: string) => {
+    switch (preset) {
+      case 'new':
+        setPostFilters({ channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000 });
+        break;
+      case 'growing':
+        setPostFilters({ channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000 });
+        break;
+      case 'established':
+        setPostFilters({ channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000 });
+        break;
+      case 'reset':
+        setPostFilters({ channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000 });
+        break;
+    }
+  };
+
   const sortResults = (videos: any[]) => {
     const sorted = [...videos].sort((a, b) => {
       const getValue = (video: any, criterion: string) => {
@@ -378,6 +419,8 @@ const NicheFinder = () => {
 
     return sorted;
   };
+
+  const filteredAndSortedResults = applyPostFilters(sortResults(results));
 
   return (
     <div className="space-y-8">
@@ -590,7 +633,7 @@ const NicheFinder = () => {
                 📊 Resultados ({results.length} vídeos)
               </h2>
               <Button
-                onClick={() => exportToExcel(sortResults(results), 'niche-finder-resultados')}
+                onClick={() => exportToExcel(filteredAndSortedResults, 'niche-finder-resultados')}
                 variant="outline"
               >
                 <Download className="mr-2 h-4 w-4" />
@@ -626,10 +669,115 @@ const NicheFinder = () => {
               </div>
             </div>
 
+            {/* Filtros Pós-Busca */}
+            <Card className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20 border-2 border-purple-200 dark:border-purple-800">
+              <Collapsible defaultOpen>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <CollapsibleTrigger className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+                      <Filter className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+                      <h3 className="font-bold text-lg">Filtrar Resultados</h3>
+                      <Badge variant="default" className="ml-2">
+                        {filteredAndSortedResults.length} de {results.length}
+                      </Badge>
+                    </CollapsibleTrigger>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => applyPreset('reset')}
+                    >
+                      Limpar Filtros
+                    </Button>
+                  </div>
+
+                  <CollapsibleContent>
+                    <div className="space-y-6 pt-4">
+                      {/* Presets Rápidos */}
+                      <div>
+                        <Label className="text-sm font-semibold mb-2 block">⚡ Presets Rápidos</Label>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => applyPreset('new')}
+                            className="bg-green-500/10 hover:bg-green-500/20 border-green-500/30"
+                          >
+                            🌱 Canais Novos (&lt;1 ano + &lt;10K subs)
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => applyPreset('growing')}
+                            className="bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30"
+                          >
+                            📈 Canais Crescendo (1-3 anos + 10K-100K)
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => applyPreset('established')}
+                            className="bg-purple-500/10 hover:bg-purple-500/20 border-purple-500/30"
+                          >
+                            🏆 Canais Estabelecidos (3+ anos + 100K+)
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Filtro de Idade do Canal */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold">📅 Idade do Canal</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {postFilters.channelAgeMin === 0 ? '0' : (postFilters.channelAgeMin / 365).toFixed(1)} - {(postFilters.channelAgeMax / 365).toFixed(1)} anos
+                          </span>
+                        </div>
+                        <Slider
+                          min={0}
+                          max={3650}
+                          step={30}
+                          value={[postFilters.channelAgeMin, postFilters.channelAgeMax]}
+                          onValueChange={([min, max]) => setPostFilters({ ...postFilters, channelAgeMin: min, channelAgeMax: max })}
+                          className="w-full"
+                        />
+                      </div>
+
+                      {/* Filtro de Inscritos */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold">👥 Número de Inscritos</Label>
+                          <span className="text-sm text-muted-foreground">
+                            {postFilters.subscribersMin >= 1000000 
+                              ? `${(postFilters.subscribersMin / 1000000).toFixed(1)}M` 
+                              : postFilters.subscribersMin >= 1000 
+                                ? `${(postFilters.subscribersMin / 1000).toFixed(0)}K` 
+                                : postFilters.subscribersMin}
+                            {' - '}
+                            {postFilters.subscribersMax >= 1000000 
+                              ? `${(postFilters.subscribersMax / 1000000).toFixed(1)}M` 
+                              : postFilters.subscribersMax >= 1000 
+                                ? `${(postFilters.subscribersMax / 1000).toFixed(0)}K` 
+                                : postFilters.subscribersMax}
+                          </span>
+                        </div>
+                        <Slider
+                          min={0}
+                          max={5000000}
+                          step={10000}
+                          value={[postFilters.subscribersMin, postFilters.subscribersMax]}
+                          onValueChange={([min, max]) => setPostFilters({ ...postFilters, subscribersMin: min, subscribersMax: max })}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </CollapsibleContent>
+                </div>
+              </Collapsible>
+            </Card>
+
             {/* Lista de vídeos */}
             <div className="space-y-4">
-              {sortResults(results).map((video) => (
-                <VideoCard key={video.videoId} video={video} />
+              {filteredAndSortedResults.map((video) => (
+                <VideoCard key={video.id} video={video} />
               ))}
             </div>
           </div>
