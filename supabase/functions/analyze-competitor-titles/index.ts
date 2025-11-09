@@ -234,7 +234,21 @@ DADOS DOS VÍDEOS (${videosToAnalyze.length} vídeos${videos.length > videosToAn
 ${videosToAnalyze.map((v, i) => `${i + 1}. "${v.title}" | ${v.views.toLocaleString()} views`).join('\n')}
 
 ═══════════════════════════════════════════════════════════════
-🏆 DESTAQUE: PALAVRAS-CHAVE CAMPEÃS (APARECE PRIMEIRO!)
+🎯 FORMATO DE RESPOSTA OBRIGATÓRIO
+═══════════════════════════════════════════════════════════════
+
+**IMPORTANTE**: Sua resposta DEVE ser um JSON válido começando com:
+{
+  "palavras_chave_campeas": { ... },
+  "resumo_1": { ... },
+  "resumo_2": { ... },
+  "insights": "..."
+}
+
+NÃO omita nenhum campo. Todos são obrigatórios.
+
+═══════════════════════════════════════════════════════════════
+🏆 CAMPO 1: PALAVRAS-CHAVE CAMPEÃS (OBRIGATÓRIO!)
 ═══════════════════════════════════════════════════════════════
 
 OBJETIVO: Identificar as palavras-chave/frases que se repetem nos títulos de MAIOR SUCESSO.
@@ -247,31 +261,31 @@ ANÁLISE REQUERIDA:
    - Número de aparições
    - Média de views dos vídeos que a contêm
    - Média de VPH dos vídeos que a contêm (se disponível)
-   - Melhor título que a utiliza
+   - Melhor título que a utiliza (título completo)
+   - Views do melhor título
 5. Gerar observação detalhada (100-150 palavras) explicando:
    - Por que essas palavras funcionam
    - Padrões temáticos identificados
    - Recomendações de uso
 
-FORMATO JSON (incluir no início da resposta):
+FORMATO OBRIGATÓRIO:
 {
   "palavras_chave_campeas": {
     "ranking": [
       {
-        "keyword": "My Parents",
-        "occurrences": 23,
+        "keyword": "exemplo de palavra-chave",
+        "occurrences": 5,
         "avgViews": 4200,
         "avgVPH": 43,
-        "bestTitle": "Título completo aqui",
+        "bestTitle": "Título completo do vídeo aqui",
         "bestTitleViews": 15000
       }
     ],
     "observacao_detalhada": "Análise de 100-150 palavras sobre os padrões identificados..."
-  }
-}
+  },
 
 ═══════════════════════════════════════════════════════════════
-SUA MISSÃO: CRIAR 3 RESUMOS COMPLEMENTARES
+CAMPO 2: RESUMO 1 - ESTRUTURA HIERÁRQUICA (OBRIGATÓRIO!)
 ═══════════════════════════════════════════════════════════════
 
 RESUMO 1 - ESTRUTURA HIERÁRQUICA DO CONTEÚDO (COMPACTO)
@@ -302,6 +316,9 @@ MICRO-SUB-NICHOS (4 grupos):
    - Estrutura DETALHADA: [Nome Personagem/Novela] + [verbo impactante: estuprada/torturada/abusada] + contexto específico
 
 ═══════════════════════════════════════════════════════════════
+CAMPO 3: RESUMO 2 - RANKING DE PERFORMANCE (OBRIGATÓRIO!)
+═══════════════════════════════════════════════════════════════
+
 RESUMO 2 - RANKING DE PERFORMANCE (FOCO NOS CAMPEÕES) 🏆
 ─────────────────────────────────────────────────────────────
 
@@ -335,6 +352,9 @@ Top 5: "Título 1" (14K), "Título 2" (11K), "Título 3" (9.5K), "Título 4" (8K
 - FOCO MÁXIMO: Queremos o MAIOR NÚMERO possível de campeões viáveis (até 10)!
 
 ═══════════════════════════════════════════════════════════════
+CAMPO 4: RESUMO 3 - O QUE NUNCA FAZER (OBRIGATÓRIO!)
+═══════════════════════════════════════════════════════════════
+
 RESUMO 3 - O QUE NUNCA FAZER (COMPACTO)
 ─────────────────────────────────────────────────────────────
 
