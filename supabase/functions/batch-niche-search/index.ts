@@ -175,7 +175,12 @@ async function searchNiche(niche: string, apiKey: string, filters: any) {
       return false;
     }
     
-    // Filtro de duração do vídeo
+    // Filtro de duração mínima em segundos
+    if (filters.minDuration && video.durationSeconds < filters.minDuration) {
+      return false;
+    }
+    
+    // Filtro de duração do vídeo (categorias)
     const minDuration = filters.videoDuration === 'long' ? 1200 :   // 20+ min
                         filters.videoDuration === 'medium' ? 240 :   // 4-20 min
                         filters.videoDuration === 'short' ? 0 : 0;   // <4 min ou any
@@ -240,18 +245,19 @@ serve(async (req) => {
       });
     }
 
-    // Valores padrão MUITO MAIS RELAXADOS para garantir resultados
-    const defaultFilters = {
-      maxSubscribers: 1000000,    // 1M ao invés de 100k
-      minSubscribers: 0,
-      minViews: 0,                // Sem mínimo ao invés de 5k
-      maxVideoAge: 365,           // 1 ano ao invés de 60 dias
-      minEngagement: 0,
-      videoDuration: 'any',       // Qualquer duração ao invés de 'long'
-      maxChannelVideos: 10000,
-      maxChannelAge: 3650,
-      minViewSubRatio: 0
-    };
+  // Valores padrão MUITO MAIS RELAXADOS para garantir resultados
+  const defaultFilters = {
+    maxSubscribers: 1000000,    // 1M ao invés de 100k
+    minSubscribers: 0,
+    minViews: 0,                // Sem mínimo ao invés de 5k
+    maxVideoAge: 365,           // 1 ano ao invés de 60 dias
+    minEngagement: 0,
+    videoDuration: 'medium',    // Médios e longos (4+ min)
+    minDuration: 480,           // 8+ minutos (480 segundos)
+    maxChannelVideos: 10000,
+    maxChannelAge: 3650,
+    minViewSubRatio: 0
+  };
 
     const appliedFilters = { ...defaultFilters, ...filters };
     console.log(`📦 Processando batch de ${nichesBatch.length} nichos`);
