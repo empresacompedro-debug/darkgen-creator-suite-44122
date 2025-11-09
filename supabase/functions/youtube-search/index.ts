@@ -183,12 +183,12 @@ serve(async (req) => {
               collectedByCategory = videoData.items.length;
               
               // Filtrar por duração conforme preferência do cliente
+              const mediumMin = 480; // 8+ min (conforme solicitado)
               const longThreshold = 1200; // >= 20min
-              const mediumMin = 240; // 4min
               const filterByDuration = (v: any) => {
                 if (!videoDuration || videoDuration === 'any') return true;
                 const durationSeconds = parseISO8601Duration(v.contentDetails.duration);
-                if (videoDuration === 'long') return durationSeconds >= longThreshold;
+                if (videoDuration === 'long') return durationSeconds >= mediumMin; // 8+ min
                 if (videoDuration === 'medium') return durationSeconds >= mediumMin && durationSeconds < longThreshold;
                 if (videoDuration === 'short') return durationSeconds < mediumMin;
                 return true;
