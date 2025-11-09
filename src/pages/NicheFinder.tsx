@@ -15,6 +15,7 @@ import { UserManual } from "@/components/niche-finder/UserManual";
 import { NicheListsManager } from "@/components/niche-finder/NicheListsManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 const NicheFinder = () => {
@@ -122,7 +123,8 @@ const NicheFinder = () => {
       const searchParams = {
         keyword,
         nichesList,
-        aiModel
+        aiModel,
+        maxPagesPerNiche
       };
 
       const { error } = await supabase
@@ -160,6 +162,7 @@ const NicheFinder = () => {
     setKeyword(params.keyword || "");
     setNichesList(params.nichesList || "");
     setAiModel(params.aiModel || "gemini-2.5-flash");
+    setMaxPagesPerNiche(params.maxPagesPerNiche || 10);
     setResults(search.results || []);
     
     setShowHistoryDialog(false);
@@ -244,8 +247,9 @@ const NicheFinder = () => {
             nichesBatch: batch,
             batchSearchId: batchSearch.id,
             filters: {
-              minDuration: 480,  // ÚNICO FILTRO: 8+ minutos
-              videoDuration: 'any'
+              minDuration: 480,
+              videoDuration: 'any',
+              maxPages: maxPagesPerNiche
             }
           }
         });
