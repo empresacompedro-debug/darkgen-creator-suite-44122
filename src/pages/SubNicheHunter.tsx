@@ -1192,7 +1192,7 @@ ha 1 dia
                                   {kw.occurrences} aparições
                                 </Badge>
                                 <Badge variant="outline">
-                                  Média: {Math.round(kw.avgViews).toLocaleString('pt-BR')} views
+                                  Média: {Math.round(kw.avgViews || 0).toLocaleString('pt-BR')} views
                                 </Badge>
                                 {kw.avgVPH > 0 && (
                                   <Badge variant="default">
@@ -1211,7 +1211,7 @@ ha 1 dia
                             <div className="p-2 bg-background/50 rounded">
                               <p className="text-sm text-foreground">"{kw.bestTitle}"</p>
                               <Badge variant="outline" className="text-xs mt-1">
-                                {kw.bestTitleViews.toLocaleString('pt-BR')} views
+                                {(kw.bestTitleViews || 0).toLocaleString('pt-BR')} views
                               </Badge>
                             </div>
                           </div>
@@ -1353,13 +1353,13 @@ ha 1 dia
                               )}
                               <div className="flex flex-wrap gap-2 text-xs">
                                 <Badge variant="secondary">
-                                  {microNiche.totalViews.toLocaleString('pt-BR')} views totais
+                                  {(microNiche.totalViews || 0).toLocaleString('pt-BR')} views totais
                                 </Badge>
                                 <Badge variant="outline">
-                                  {microNiche.videoCount} vídeos
+                                  {microNiche.videoCount || 0} vídeos
                                 </Badge>
                                 <Badge variant="default" className={microNiche.isChampion ? 'bg-yellow-500 text-black' : ''}>
-                                  Média: {Math.round(microNiche.avgViewsPerVideo).toLocaleString('pt-BR')} views/vídeo
+                                  Média: {Math.round(microNiche.avgViewsPerVideo || 0).toLocaleString('pt-BR')} views/vídeo
                                 </Badge>
                               </div>
                             </div>
@@ -1407,7 +1407,7 @@ ha 1 dia
                                       <span className="text-xs text-muted-foreground mr-2">#{idx + 1}</span>
                                       <span className="text-muted-foreground flex-1 text-xs">"{video.title}"</span>
                                       <Badge variant="outline" className="text-xs whitespace-nowrap">
-                                        {video.views.toLocaleString('pt-BR')} views
+                                        {(video.views || 0).toLocaleString('pt-BR')} views
                                       </Badge>
                                     </div>
                                     <div className="ml-6 mt-1">
@@ -1570,13 +1570,13 @@ ha 1 dia
                               {/* Métricas */}
                               <div className="flex flex-wrap gap-2 text-xs mb-3">
                                 <Badge variant="secondary" className="bg-muted">
-                                  {failed.totalViews.toLocaleString('pt-BR')} views totais
+                                  {(failed.totalViews || 0).toLocaleString('pt-BR')} views totais
                                 </Badge>
                                 <Badge variant="outline">
-                                  {failed.videoCount} vídeos
+                                  {failed.videoCount || 0} vídeos
                                 </Badge>
                                 <Badge variant="destructive">
-                                  Média: {Math.round(failed.avgViewsPerVideo).toLocaleString('pt-BR')} views/vídeo
+                                  Média: {Math.round(failed.avgViewsPerVideo || 0).toLocaleString('pt-BR')} views/vídeo
                                 </Badge>
                               </div>
 
