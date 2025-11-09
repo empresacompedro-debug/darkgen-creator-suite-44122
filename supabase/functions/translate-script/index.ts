@@ -146,12 +146,15 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
               }
               
               apiKey = keyData.key;
+              // Usar gemini-2.0-flash-exp para todos os modelos Gemini 2.5
               const modelMap: Record<string, string> = {
                 'gemini-2.5-pro': 'gemini-2.0-flash-exp',
                 'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-                'gemini-2.5-flash-lite': 'gemini-1.5-flash'
+                'gemini-2.5-flash-lite': 'gemini-2.0-flash-exp'
               };
-              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[modelToUse] || 'gemini-2.0-flash-exp'}:streamGenerateContent?key=${apiKey}&alt=sse`;
+              const finalGeminiModel = modelMap[modelToUse] || 'gemini-2.0-flash-exp';
+              console.log(`🤖 [translate-script] Modelo Gemini mapeado: ${modelToUse} → ${finalGeminiModel}`);
+              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalGeminiModel}:streamGenerateContent?key=${apiKey}&alt=sse`;
               requestBody = {
                 contents: [{ parts: [{ text: prompt }] }]
               };
@@ -166,12 +169,22 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
               
               apiKey = keyData.key;
               apiUrl = 'https://api.openai.com/v1/chat/completions';
+              
+              // Mapear modelos OpenAI corretamente
+              const openaiModelMap: Record<string, string> = {
+                'gpt-4o-mini': 'gpt-4o-mini',
+                'gpt-4.1-2025-04-14': 'gpt-4-turbo',
+                'gpt-4.1': 'gpt-4-turbo'
+              };
+              const finalOpenAIModel = openaiModelMap[modelToUse] || modelToUse;
+              console.log(`🤖 [translate-script] Modelo OpenAI mapeado: ${modelToUse} → ${finalOpenAIModel}`);
+              
               const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
               const maxTokens = getMaxTokensForModel(modelToUse);
-              console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${modelToUse} (${targetLang})`);
+              console.log(`📦 [translate-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${finalOpenAIModel} (${targetLang})`);
               
               requestBody = {
-                model: modelToUse,
+                model: finalOpenAIModel,
                 messages: [{ role: 'user', content: prompt }],
                 stream: true,
                 ...(isReasoningModel 

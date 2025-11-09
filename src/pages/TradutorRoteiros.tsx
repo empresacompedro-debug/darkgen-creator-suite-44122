@@ -377,7 +377,7 @@ const TradutorRoteiros = () => {
             <h2 className="text-2xl font-bold text-foreground">Visualizando Histórico</h2>
             <Button onClick={() => setViewingHistory(null)} variant="outline">Fechar</Button>
           </div>
-          {Object.entries(viewingHistory.translations || {}).map(([lang, content]: [string, any]) => {
+          {Object.entries(JSON.parse(viewingHistory.translated_content || '{}') || {}).map(([lang, content]: [string, any]) => {
             const langName = languages.find(l => l.code === lang)?.name || lang;
             return (
               <Card key={lang} className="p-6 shadow-soft">
