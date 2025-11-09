@@ -1,9 +1,8 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sparkles, Loader2, Trash2, Eye, BookOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,12 +15,10 @@ import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 const Brainstorm = () => {
   const { toast } = useToast();
   const { user, session } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
-  const [niche, setNiche] = useState("");
-  const [subNiche, setSubNiche] = useState("");
-  const [language, setLanguage] = useState("pt");
+  const [prompt, setPrompt] = useState("");
+  const [streamingResponse, setStreamingResponse] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const [aiModel, setAiModel] = useState("claude-sonnet-4.5");
-  const [ideas, setIdeas] = useState<string[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [viewingHistory, setViewingHistory] = useState<any>(null);
   const [showManual, setShowManual] = useState(false);
@@ -38,62 +35,94 @@ const Brainstorm = () => {
     if (data) setHistory(data);
   };
 
-  const nicheOptions = [
-    "Curiosidades", "Histórias", "True Crime", "Crimes reais", "Mistérios",
-    "Finanças Pessoais", "Desenvolvimento Pessoal", "Saúde e Bem-estar",
-    "Tecnologia", "Gaming", "Entretenimento"
-  ];
-
-  const handleGenerateIdeas = async () => {
-    if (!niche.trim()) {
+  const handleStreamIdeas = async () => {
+    if (!prompt.trim()) {
       toast({
         title: "Erro",
-        description: "Por favor, selecione um nicho",
+        description: "Por favor, digite sua pergunta",
         variant: "destructive",
       });
       return;
     }
 
-    setIsLoading(true);
+    setIsStreaming(true);
+    setStreamingResponse("");
+
     try {
-      const { data, error } = await supabase.functions.invoke('brainstorm-ideas', {
-        body: { 
-          niche,
-          subNiche: subNiche || undefined,
-          language,
-          aiModel
-        },
-        headers: {
-          Authorization: `Bearer ${session?.access_token}`
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/brainstorm-ideas`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+          },
+          body: JSON.stringify({
+            prompt: prompt.trim(),
+            aiModel
+          })
         }
-      });
+      );
 
-      if (error) throw error;
+      if (!response.ok || !response.body) {
+        throw new Error('Falha ao iniciar streaming');
+      }
 
-      setIdeas(data.ideas || []);
-      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let fullResponse = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.content || '';
+              fullResponse += content;
+              setStreamingResponse(fullResponse);
+            } catch (e) {
+              // Linha incompleta, ignora
+            }
+          }
+        }
+      }
+
+      // Salvar no histórico
       await supabase.from('brainstorm_ideas').insert({
-        niche,
-        sub_niche: subNiche || null,
-        language,
-        ideas: data.ideas,
+        niche: prompt.slice(0, 200),
+        sub_niche: null,
+        language: 'pt',
+        ideas: [fullResponse],
         ai_model: aiModel,
         user_id: user?.id
       });
-      
+
       await loadHistory();
+      
       toast({
-        title: "Ideias Geradas!",
-        description: `${data.ideas?.length || 0} ideias de vídeos foram criadas`,
+        title: "Resposta Completa!",
+        description: "A IA finalizou a geração",
       });
+
     } catch (error: any) {
+      console.error("Erro:", error);
       toast({
         title: "Erro",
-        description: error.message || "Erro ao gerar ideias",
+        description: error.message || "Erro ao gerar resposta",
         variant: "destructive",
       });
     } finally {
-      setIsLoading(false);
+      setIsStreaming(false);
     }
   };
 
@@ -103,7 +132,7 @@ const Brainstorm = () => {
     toast({ title: "Excluído!", description: "Ideias removidas do histórico" });
   };
 
-  const displayIdeas = viewingHistory?.ideas || ideas;
+  const displayHistory = viewingHistory?.ideas?.[0] || "";
 
   return (
     <SubscriptionGuard toolName="Brainstorm de Ideias">
@@ -124,92 +153,60 @@ const Brainstorm = () => {
       <Card className="p-6 shadow-medium">
         <div className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="niche">Nicho do Canal</Label>
-            <Select value={niche} onValueChange={setNiche}>
-              <SelectTrigger id="niche">
-                <SelectValue placeholder="Selecione o nicho" />
-              </SelectTrigger>
-              <SelectContent>
-                {nicheOptions.map((option) => (
-                  <SelectItem key={option} value={option}>{option}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="subNiche">Subnicho (Opcional)</Label>
-            <Input
-              id="subNiche"
-              placeholder="ex: Crimes não resolvidos dos anos 90"
-              value={subNiche}
-              onChange={(e) => setSubNiche(e.target.value)}
+            <Label htmlFor="prompt">O que você quer descobrir?</Label>
+            <Textarea
+              id="prompt"
+              placeholder="Ex: Me dê 100 micronichos lucrativos de true crime para YouTube com CPM estimado..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={4}
+              className="resize-none"
             />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="language">Idioma</Label>
-              <Select value={language} onValueChange={setLanguage}>
-                <SelectTrigger id="language">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pt">Português BR</SelectItem>
-                  <SelectItem value="en">English US</SelectItem>
-                  <SelectItem value="es">Español (España)</SelectItem>
-                  <SelectItem value="fr">Français (France)</SelectItem>
-                  <SelectItem value="de">Deutsch (Alemanha)</SelectItem>
-                  <SelectItem value="it">Italiano (Italia)</SelectItem>
-                  <SelectItem value="ja">日本語</SelectItem>
-                  <SelectItem value="ko">한국어</SelectItem>
-                  <SelectItem value="ro">Română (România)</SelectItem>
-                  <SelectItem value="pl">Polski (Polska)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <AIModelSelector 
-              value={aiModel} 
-              onChange={setAiModel} 
-              label="Modelo de IA" 
-            />
-          </div>
+          <AIModelSelector 
+            value={aiModel} 
+            onChange={setAiModel} 
+            label="Modelo de IA" 
+          />
 
           <Button
-            onClick={handleGenerateIdeas}
-            disabled={isLoading}
+            onClick={handleStreamIdeas}
+            disabled={isStreaming || !prompt.trim()}
             className="w-full"
           >
-            {isLoading ? (
+            {isStreaming ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                Gerando Ideias...
+                Gerando Resposta...
               </>
             ) : (
               <>
                 <Sparkles className="h-4 w-4 mr-2" />
-                Gerar Ideias
+                Enviar Pergunta
               </>
             )}
           </Button>
         </div>
       </Card>
 
-      {displayIdeas.length > 0 && (
+      {(isStreaming || streamingResponse || viewingHistory) && (
         <Card className="p-6 shadow-soft">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-foreground">{viewingHistory ? 'Visualizando Histórico' : 'Ideias Geradas'}</h2>
+            <h2 className="text-2xl font-bold text-foreground">
+              {viewingHistory ? 'Visualizando Histórico' : 'Resposta da IA'}
+            </h2>
             {viewingHistory && (
-              <Button onClick={() => setViewingHistory(null)} variant="outline">Fechar</Button>
+              <Button onClick={() => setViewingHistory(null)} variant="outline" size="sm">
+                Fechar
+              </Button>
             )}
           </div>
-          <div className="space-y-3">
-            {displayIdeas.map((idea: string, index: number) => (
-              <div key={index} className="p-4 bg-accent/10 rounded-lg border border-accent/20">
-                <p className="text-sm font-medium text-foreground">{idea}</p>
-              </div>
-            ))}
+          <div className="prose prose-sm max-w-none">
+            <div className="whitespace-pre-wrap text-sm text-foreground leading-relaxed">
+              {viewingHistory ? displayHistory : streamingResponse}
+              {isStreaming && <span className="animate-pulse ml-1">▋</span>}
+            </div>
           </div>
         </Card>
       )}

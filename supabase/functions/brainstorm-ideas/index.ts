@@ -33,45 +33,34 @@ serve(async (req) => {
     
     const body = await req.json();
     
-    // Validate inputs
+    // Validar apenas prompt livre
     const errors = [
-      ...validateString(body.niche, 'niche', { required: true, maxLength: 200 }),
-      ...validateString(body.subNiche, 'subNiche', { maxLength: 200 }),
-      ...validateString(body.language, 'language', { required: true, maxLength: 50 }),
+      ...validateString(body.prompt, 'prompt', { required: true, maxLength: 2000 }),
       ...validateString(body.aiModel, 'aiModel', { required: true, maxLength: 50 }),
     ];
     validateOrThrow(errors);
     
-    const niche = sanitizeString(body.niche);
-    const subNiche = body.subNiche ? sanitizeString(body.subNiche) : undefined;
-    const language = body.language;
+    const userPrompt = sanitizeString(body.prompt);
     const aiModel = body.aiModel;
 
-    const languageNames: Record<string, string> = {
-      pt: 'português brasileiro',
-      en: 'English',
-      es: 'español',
-      fr: 'français',
-      de: 'Deutsch',
-      it: 'italiano',
-      ja: '日本語',
-      ko: '한국어',
-      ro: 'română',
-      pl: 'polski'
-    };
+    console.log('Processing prompt:', { aiModel, promptLength: userPrompt.length });
 
-    const prompt = `Você é um especialista em criação de conteúdo viral para YouTube. 
+    // System prompt conversacional
+    const systemPrompt = `Você é um especialista em criação de conteúdo viral para YouTube e descoberta de nichos lucrativos.
 
-Gere 10 ideias de vídeos ALTAMENTE VIRAIS e envolventes para um canal de YouTube no nicho: "${niche}"${subNiche ? `, com foco em: "${subNiche}"` : ''}.
+Sua tarefa é responder às perguntas do usuário de forma detalhada, fornecendo insights valiosos sobre nichos, micronichos, tendências e estratégias de conteúdo.
 
-REQUISITOS:
-- Cada ideia deve ser ÚNICA e ESPECÍFICA
-- Foque em temas que geram ALTA RETENÇÃO e ENGAJAMENTO
-- Use títulos curiosos, controversos ou intrigantes
-- Adapte para o idioma: ${languageNames[language] || language}
-- Pense em temas que as pessoas PRECISAM clicar para descobrir
+DIRETRIZES:
+- Seja específico e prático nas suas respostas
+- Se o usuário pedir uma lista (ex: 100 nichos), forneça EXATAMENTE a quantidade solicitada
+- Numere as listas quando apropriado
+- Inclua informações sobre CPM estimado quando relevante
+- Foque em nichos lucrativos e com potencial de engajamento
+- Use exemplos concretos sempre que possível
 
-Formato: Liste as 10 ideias numeradas (1-10), uma por linha, sem explicações adicionais.`;
+Responda de forma clara, organizada e valiosa.`;
+
+    const fullPrompt = `${systemPrompt}\n\nPERGUNTA DO USUÁRIO:\n${userPrompt}`;
 
     let apiUrl = '';
     let apiKey = '';
@@ -115,7 +104,8 @@ Formato: Liste as 10 ideias numeradas (1-10), uma por linha, sem explicações a
       requestBody = {
         model: aiModel,
         max_tokens: 8192,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [{ role: 'user', content: fullPrompt }],
+        stream: true
       };
     } else if (aiModel.startsWith('gemini')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key Google`);
@@ -149,11 +139,11 @@ Formato: Liste as 10 ideias numeradas (1-10), uma por linha, sem explicações a
         if (apiKey) console.log(`✅ [brainstorm-ideas] Usando chave global`);
       }
       
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${apiKey}`;
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
       
       requestBody = {
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: fullPrompt }] }]
       };
     } else if (aiModel.startsWith('gpt')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key OpenAI`);
@@ -196,8 +186,9 @@ Formato: Liste as 10 ideias numeradas (1-10), uma por linha, sem explicações a
       
       requestBody = {
         model: aiModel,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 8192
+        messages: [{ role: 'user', content: fullPrompt }],
+        max_tokens: 8192,
+        stream: true
       };
     }
 
@@ -216,34 +207,98 @@ Formato: Liste as 10 ideias numeradas (1-10), uma por linha, sem explicações a
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(apiUrl, {
+    const apiResponse = await fetch(apiUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(requestBody)
     });
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('API Error:', errorData);
-      throw new Error(`API Error: ${response.status}`);
+    if (!apiResponse.ok) {
+      const errorData = await apiResponse.text();
+      console.error('API Error Response:', errorData);
+      throw new Error(`API Error: ${apiResponse.status} - ${errorData}`);
     }
 
-    const data = await response.json();
-    let ideas: string[] = [];
+    // Retornar stream SSE
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = apiResponse.body!.getReader();
+        const decoder = new TextDecoder();
+        const encoder = new TextEncoder();
 
-    if (aiModel.startsWith('claude')) {
-      const text = data.content[0].text;
-      ideas = text.split('\n').filter((line: string) => line.trim().match(/^\d+\./)).map((line: string) => line.trim());
-    } else if (aiModel.startsWith('gemini')) {
-      const text = data.candidates[0].content.parts[0].text;
-      ideas = text.split('\n').filter((line: string) => line.trim().match(/^\d+\./)).map((line: string) => line.trim());
-    } else if (aiModel.startsWith('gpt')) {
-      const text = data.choices[0].message.content;
-      ideas = text.split('\n').filter((line: string) => line.trim().match(/^\d+\./)).map((line: string) => line.trim());
-    }
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-    return new Response(JSON.stringify({ ideas }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+              if (!line.trim() || line.startsWith(':')) continue;
+
+              let content = '';
+
+              // Parse baseado no provider
+              if (aiModel.startsWith('claude')) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.type === 'content_block_delta') {
+                      content = parsed.delta?.text || '';
+                    }
+                  } catch (e) {
+                    console.error('Error parsing Claude chunk:', e);
+                  }
+                }
+              } else if (aiModel.startsWith('gemini')) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  try {
+                    const parsed = JSON.parse(data);
+                    content = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                  } catch (e) {
+                    console.error('Error parsing Gemini chunk:', e);
+                  }
+                }
+              } else if (aiModel.startsWith('gpt')) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  try {
+                    const parsed = JSON.parse(data);
+                    content = parsed.choices?.[0]?.delta?.content || '';
+                  } catch (e) {
+                    console.error('Error parsing OpenAI chunk:', e);
+                  }
+                }
+              }
+
+              if (content) {
+                const sseData = `data: ${JSON.stringify({ content })}\n\n`;
+                controller.enqueue(encoder.encode(sseData));
+              }
+            }
+          }
+
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        } catch (error) {
+          console.error('Stream error:', error);
+          controller.error(error);
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (error: any) {
     if (error instanceof ValidationException) {
