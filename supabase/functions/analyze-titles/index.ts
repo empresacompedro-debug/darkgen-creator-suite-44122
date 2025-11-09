@@ -221,10 +221,7 @@ IMPORTANTE:
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 32768,
-            thinkingConfig: {
-              thinkingMode: "DISABLED"
-            }
+            maxOutputTokens: 8192,
           },
         }),
       });
@@ -261,88 +258,10 @@ IMPORTANTE:
         const finishReason = (candidate as any)?.finishReason ?? data?.promptFeedback?.blockReason ?? 'unknown';
         const safety = (candidate as any)?.safetyRatings ?? data?.promptFeedback?.safetyRatings;
         console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
-
-        // Fallback strategy: try Claude first when we hit token limits or empty output
-        try {
-          if (finishReason === 'MAX_TOKENS') {
-            const anthKey = Deno.env.get('ANTHROPIC_API_KEY');
-            if (anthKey) {
-              console.log('Retrying with Claude (claude-sonnet-4-5) due to Gemini MAX_TOKENS');
-              const claudeResp = await fetch('https://api.anthropic.com/v1/messages', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'x-api-key': anthKey,
-                  'anthropic-version': '2023-06-01',
-                },
-                body: JSON.stringify({
-                  model: 'claude-sonnet-4-5',
-                  max_tokens: 8192,
-                  messages: [
-                    { role: 'user', content: prompt }
-                  ],
-                }),
-              });
-              if (!claudeResp.ok) {
-                const t = await claudeResp.text();
-                console.error('Claude fallback error:', t);
-              } else {
-                const cdata = await claudeResp.json();
-                const md = cdata?.content?.[0]?.text;
-                if (md && md.trim()) {
-                  analysis = { markdownReport: md };
-                  console.log('Claude fallback succeeded');
-                } else {
-                  console.error('Claude fallback missing content');
-                }
-              }
-            } else {
-              console.warn('Claude fallback skipped: ANTHROPIC_API_KEY not configured');
-            }
-
-            if (!analysis.markdownReport) {
-              // Second fallback: try Gemini 2.5 Pro for larger budgets
-              const proKey = Deno.env.get('GEMINI_API_KEY');
-              const proUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${proKey}`;
-              console.log('Retrying with Gemini 2.5 Pro');
-              const proResp = await fetch(proUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                  generationConfig: { temperature: 0.7, maxOutputTokens: 32768 },
-                }),
-              });
-              if (proResp.ok) {
-                const pdata = await proResp.json();
-                const pcand = pdata?.candidates?.[0];
-                let pmd = '';
-                const pparts = pcand?.content?.parts;
-                if (Array.isArray(pparts) && pparts.length > 0) {
-                  pmd = pparts.map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? ''))).join('');
-                } else if (typeof (pcand as any)?.text === 'string') {
-                  pmd = (pcand as any).text;
-                }
-                if (!pmd && typeof (pdata as any).text === 'string') pmd = (pdata as any).text;
-                if (pmd && pmd.trim()) {
-                  analysis = { markdownReport: pmd };
-                  console.log('Gemini Pro fallback succeeded');
-                }
-              } else {
-                console.error('Gemini Pro fallback error:', await proResp.text());
-              }
-            }
-          }
-        } catch (fbErr) {
-          console.error('Fallback attempt failed:', fbErr);
-        }
-
-        if (!analysis.markdownReport) {
-          throw new Error('Gemini não retornou texto (possível bloqueio de segurança ou limite). Tente selecionar Claude Sonnet 4.5 ou reduzir os dados.');
-        }
-      } else {
-        analysis = { markdownReport };
+        throw new Error('Gemini não retornou texto (possível bloqueio de segurança). Tente ajustar o prompt ou reduzir os dados.');
       }
+      
+      analysis = { markdownReport };
     } else if (aiModel.includes('gpt')) {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       
