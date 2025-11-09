@@ -25,13 +25,13 @@ export function VideoCard({ video }: VideoCardProps) {
         {/* Thumbnail */}
         <div className="flex-shrink-0">
           <a 
-            href={`https://www.youtube.com/watch?v=${video.videoId}`}
+            href={`https://www.youtube.com/watch?v=${video.id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="block relative group"
           >
             <img 
-              src={video.thumbnail || `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`}
+              src={video.thumbnail || `https://i.ytimg.com/vi/${video.id}/mqdefault.jpg`}
               alt={video.title}
               className="w-48 h-27 object-cover rounded-md group-hover:opacity-80 transition-opacity"
             />
@@ -44,7 +44,7 @@ export function VideoCard({ video }: VideoCardProps) {
         {/* Info */}
         <div className="flex-1 min-w-0">
           <a 
-            href={`https://www.youtube.com/watch?v=${video.videoId}`}
+            href={`https://www.youtube.com/watch?v=${video.id}`}
             target="_blank"
             rel="noopener noreferrer"
             className="block group"
