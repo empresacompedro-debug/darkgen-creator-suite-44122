@@ -11,15 +11,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UserManual } from "@/components/brainstorm/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 const Brainstorm = () => {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [niche, setNiche] = useState("");
   const [subNiche, setSubNiche] = useState("");
   const [language, setLanguage] = useState("pt");
-  const [aiModel, setAiModel] = useState("gemini-2.5-flash");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4.5");
   const [ideas, setIdeas] = useState<string[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [viewingHistory, setViewingHistory] = useState<any>(null);
@@ -61,6 +62,9 @@ const Brainstorm = () => {
           subNiche: subNiche || undefined,
           language,
           aiModel
+        },
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`
         }
       });
 
@@ -165,25 +169,11 @@ const Brainstorm = () => {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="aiModel">Modelo de IA</Label>
-              <Select value={aiModel} onValueChange={setAiModel}>
-                <SelectTrigger id="aiModel">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="claude-sonnet-4">Anthropic Claude Sonnet 4</SelectItem>
-                  <SelectItem value="claude-sonnet-4.5">Anthropic Claude Sonnet 4.5</SelectItem>
-                  <SelectItem value="claude-sonnet-3.5">Anthropic Claude Sonnet 3.5</SelectItem>
-                  <SelectItem value="gemini-2.5-pro">Google Gemini 2.5 Pro</SelectItem>
-                  <SelectItem value="gemini-2.5-flash">Google Gemini 2.5 Flash</SelectItem>
-                  <SelectItem value="gemini-2.5-flash-lite">Google Gemini 2.5 Flash Lite</SelectItem>
-                  <SelectItem value="gpt-4o">OpenAI GPT-4o</SelectItem>
-                  <SelectItem value="gpt-4-turbo">OpenAI GPT-4 Turbo</SelectItem>
-                  <SelectItem value="gpt-3.5-turbo">OpenAI GPT-3.5 Turbo</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <AIModelSelector 
+              value={aiModel} 
+              onChange={setAiModel} 
+              label="Modelo de IA" 
+            />
           </div>
 
           <Button
