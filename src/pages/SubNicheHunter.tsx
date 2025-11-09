@@ -96,9 +96,24 @@ interface Resumo3 {
   micro_nichos_que_falharam: FailedMicroNiche[];
 }
 
+interface KeywordRanking {
+  keyword: string;
+  occurrences: number;
+  avgViews: number;
+  avgVPH: number;
+  bestTitle: string;
+  bestTitleViews: number;
+}
+
+interface PalavrasChaveCampeas {
+  ranking: KeywordRanking[];
+  observacao_detalhada: string;
+}
+
 interface AnalysisResult {
   sub_nichos: SubNicheResult[];
   insights: string;
+  palavras_chave_campeas?: PalavrasChaveCampeas;
   resumo_1?: Resumo1;
   resumo_2?: Resumo2;
   resumo_3?: Resumo3;
@@ -829,6 +844,82 @@ const SubNicheHunter = () => {
                   Exportar Excel
                 </Button>
               </div>
+
+              {/* NOVO: PALAVRAS-CHAVE CAMPEÃS - Aparece PRIMEIRO */}
+              {analysisResult.palavras_chave_campeas && (
+                <Card className="border-yellow-500/30 bg-gradient-to-br from-yellow-500/10 to-orange-500/10">
+                  <CardHeader>
+                    <div className="flex items-center gap-3">
+                      <Trophy className="h-7 w-7 text-yellow-500" />
+                      <div>
+                        <CardTitle className="text-2xl">🏆 Palavras-Chave Campeãs</CardTitle>
+                        <CardDescription>
+                          Palavras/frases que mais aparecem nos títulos de maior sucesso
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6">
+                    {/* Ranking de Keywords */}
+                    <div className="space-y-3">
+                      {analysisResult.palavras_chave_campeas.ranking.map((kw, idx) => (
+                        <div 
+                          key={idx}
+                          className="p-4 rounded-lg border-2 border-yellow-500/30 bg-card"
+                        >
+                          <div className="flex items-start justify-between gap-4 mb-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-2xl font-bold text-yellow-500">#{idx + 1}</span>
+                                <h5 className="text-lg font-bold text-foreground">
+                                  "{kw.keyword}"
+                                </h5>
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs mt-2">
+                                <Badge variant="secondary" className="bg-yellow-500/20">
+                                  {kw.occurrences} aparições
+                                </Badge>
+                                <Badge variant="outline">
+                                  Média: {Math.round(kw.avgViews).toLocaleString('pt-BR')} views
+                                </Badge>
+                                {kw.avgVPH > 0 && (
+                                  <Badge variant="default">
+                                    VPH médio: {Math.round(kw.avgVPH)}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Melhor Título */}
+                          <div className="mt-3 pt-3 border-t border-border">
+                            <p className="text-xs font-semibold text-muted-foreground mb-1">
+                              📌 Melhor título com esta palavra-chave:
+                            </p>
+                            <div className="p-2 bg-background/50 rounded">
+                              <p className="text-sm text-foreground">"{kw.bestTitle}"</p>
+                              <Badge variant="outline" className="text-xs mt-1">
+                                {kw.bestTitleViews.toLocaleString('pt-BR')} views
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Observação Detalhada */}
+                    <div className="p-5 bg-gradient-to-r from-yellow-500/10 to-orange-500/10 rounded-lg border-2 border-yellow-500/40">
+                      <p className="text-sm font-bold text-yellow-600 dark:text-yellow-400 mb-3 flex items-center gap-2">
+                        <Sparkles className="h-5 w-5" />
+                        ANÁLISE DETALHADA DOS PADRÕES:
+                      </p>
+                      <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
+                        {analysisResult.palavras_chave_campeas.observacao_detalhada}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* RESUMO 1 - Estrutura Hierárquica */}
               {analysisResult.resumo_1 && (

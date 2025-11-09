@@ -135,15 +135,6 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Legacy leve - Requer API key",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />
-    },
-    // Modelo Kimi (Moonshot AI)
-    { 
-      id: "kimi-k2-thinking", 
-      name: "Kimi K2 Thinking", 
-      provider: "Moonshot AI",
-      description: "Raciocínio profundo - Requer API key",
-      requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />
     }
   ];
 

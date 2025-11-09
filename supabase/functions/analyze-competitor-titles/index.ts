@@ -130,15 +130,14 @@ serve(async (req) => {
     
     console.log(`🎯 Modelo recebido: "${aiModel}"`);
     
-    // Validação: força modelos válidos (Claude, Gemini, GPT e Kimi)
+    // Validação: força modelos válidos (Claude, Gemini, GPT)
     const validModels = [
       'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-sonnet-3.7', 
       'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
       'gpt-5-2025-08-07', 'gpt-5-mini-2025-08-07', 'gpt-5-nano-2025-08-07',
       'gpt-4.1-2025-04-14', 'gpt-4.1-mini-2025-04-14',
       'o3-2025-04-16', 'o4-mini-2025-04-16',
-      'gpt-4o', 'gpt-4o-mini',
-      'kimi-k2-thinking'
+      'gpt-4o', 'gpt-4o-mini'
     ];
     if (!validModels.includes(aiModel)) {
       console.warn(`⚠️ Modelo inválido recebido: ${aiModel}. Usando padrão: claude-sonnet-4.5`);
@@ -199,9 +198,7 @@ serve(async (req) => {
       }
       
       // Kimi K2: Limite reduzido para 30 vídeos para evitar crash da edge function
-      if (model.includes('kimi')) {
-        return 30;
-      }
+      // REMOVIDO - Kimi não é mais suportado
       
       // GPT-4.1, GPT-4o: 128K tokens = ~450 vídeos
       if (model.includes('gpt-4')) {
@@ -235,6 +232,43 @@ serve(async (req) => {
 
 DADOS DOS VÍDEOS (${videosToAnalyze.length} vídeos${videos.length > videosToAnalyze.length ? ` - top ${videosToAnalyze.length} de ${videos.length} total` : ''}):
 ${videosToAnalyze.map((v, i) => `${i + 1}. "${v.title}" | ${v.views.toLocaleString()} views`).join('\n')}
+
+═══════════════════════════════════════════════════════════════
+🏆 DESTAQUE: PALAVRAS-CHAVE CAMPEÃS (APARECE PRIMEIRO!)
+═══════════════════════════════════════════════════════════════
+
+OBJETIVO: Identificar as palavras-chave/frases que se repetem nos títulos de MAIOR SUCESSO.
+
+ANÁLISE REQUERIDA:
+1. Extrair n-gramas (1-3 palavras) de todos os títulos
+2. Ranquear por frequência E correlação com views/VPH
+3. Identificar TOP 10 palavras-chave campeãs
+4. Para cada palavra-chave, calcular:
+   - Número de aparições
+   - Média de views dos vídeos que a contêm
+   - Média de VPH dos vídeos que a contêm (se disponível)
+   - Melhor título que a utiliza
+5. Gerar observação detalhada (100-150 palavras) explicando:
+   - Por que essas palavras funcionam
+   - Padrões temáticos identificados
+   - Recomendações de uso
+
+FORMATO JSON (incluir no início da resposta):
+{
+  "palavras_chave_campeas": {
+    "ranking": [
+      {
+        "keyword": "My Parents",
+        "occurrences": 23,
+        "avgViews": 4200,
+        "avgVPH": 43,
+        "bestTitle": "Título completo aqui",
+        "bestTitleViews": 15000
+      }
+    ],
+    "observacao_detalhada": "Análise de 100-150 palavras sobre os padrões identificados..."
+  }
+}
 
 ═══════════════════════════════════════════════════════════════
 SUA MISSÃO: CRIAR 3 RESUMOS COMPLEMENTARES
@@ -322,6 +356,19 @@ FORMATO DE RESPOSTA JSON:
 Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
 
 {
+  "palavras_chave_campeas": {
+    "ranking": [
+      {
+        "keyword": "My Parents",
+        "occurrences": 23,
+        "avgViews": 4200,
+        "avgVPH": 43,
+        "bestTitle": "Título completo",
+        "bestTitleViews": 15000
+      }
+    ],
+    "observacao_detalhada": "Análise 100-150 palavras"
+  },
   "resumo_1": {
     "nicho_principal": "Nome do nicho (1 linha)",
     "sub_nichos": [
@@ -402,7 +449,7 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
 - JSON compacto e válido`;
 
     let resultText: string = '';
-    let provider: 'claude' | 'openai' | 'gemini' | 'kimi' = 'claude';
+    let provider: 'claude' | 'openai' | 'gemini' = 'claude';
 
     // 1. CLAUDE (API Key do Usuário)
     if (aiModel.startsWith('claude')) {
@@ -689,131 +736,6 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       }
       
       console.log('✅ Resposta da OpenAI recebida:', resultText.slice(0, 200));
-
-    // 4. Kimi K2 (API Key do Usuário)
-    } else if (aiModel.startsWith('kimi')) {
-      provider = 'kimi';
-      console.log('🔍 Usando API Key do Kimi do usuário');
-      
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
-      if (!apiKeyResult) {
-        throw new Error('❌ API Key do Kimi não configurada. Configure em Configurações → API Keys.');
-      }
-
-      const apiKey = apiKeyResult.key;
-      console.log(`✅ Usando chave do usuário para Kimi`);
-
-      // Validar tamanho do prompt ANTES de criar o payload
-      const promptSizeKb = new TextEncoder().encode(prompt).length / 1024;
-      console.log(`📏 Tamanho do prompt: ${promptSizeKb.toFixed(2)} KB`);
-
-      if (promptSizeKb > 100) {
-        console.error(`❌ Prompt muito grande para Kimi: ${promptSizeKb.toFixed(2)} KB`);
-        throw new Error('❌ Muitos vídeos para processar com Kimi. Reduza a quantidade de títulos (máximo 30 vídeos) ou use outro modelo de IA (Claude, Gemini, GPT).');
-      }
-
-      // Kimi K2 Thinking - Endpoint oficial Moonshot (.cn)
-      // Sempre usar kimi-k2-thinking quando selecionado pelo usuário
-      const kimiModel = 'kimi-k2-thinking';
-      const kimiPayload = {
-        model: kimiModel,
-        messages: [
-          { role: 'system', content: 'You are Kimi, an AI assistant provided by Moonshot AI. Reply ONLY with valid JSON.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 8192,
-      };
-
-      console.log(`📤 Enviando para Kimi K2 (modelo: ${kimiModel}, prompt size: ${prompt.length} chars)`);
-      
-      // Configurar timeout de 180 segundos (3 minutos)
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000);
-      
-      try {
-        const startTime = Date.now();
-        
-        // Usar APENAS o endpoint oficial da Moonshot na China (.cn)
-        const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(kimiPayload),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-        const elapsed = Date.now() - startTime;
-        console.log(`⏱️ Kimi (.cn) status: ${response.status} em ${elapsed}ms`);
-
-        // Tratar erros HTTP específicos
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error(`❌ Erro Kimi API [${response.status}]:`, errorText);
-          
-          if (response.status === 401) {
-            throw new Error('❌ API Key do Kimi inválida ou expirada. Verifique sua chave em https://platform.moonshot.cn');
-          }
-          if (response.status === 403) {
-            throw new Error('❌ Sem permissão para usar esta API Key do Kimi. Verifique as configurações da sua conta.');
-          }
-          if (response.status === 429) {
-            throw new Error('❌ Rate limit do Kimi excedido. Aguarde alguns minutos antes de tentar novamente.');
-          }
-          if (response.status >= 500) {
-            throw new Error(`❌ Serviço do Kimi temporariamente indisponível (${response.status}). Tente novamente em alguns minutos.`);
-          }
-          
-          // Erro genérico com parte do body para debug
-          const errorPreview = errorText.slice(0, 200);
-          throw new Error(`❌ Erro Kimi API (${response.status}): ${errorPreview}`);
-        }
-
-        // Processar resposta de sucesso
-        const data = await response.json();
-        console.log('📦 Resposta Kimi recebida:', JSON.stringify(data).slice(0, 300));
-
-        // Verificar erros reportados na resposta JSON
-        if (data.error) {
-          console.error('❌ Erro reportado pelo Kimi:', JSON.stringify(data.error));
-          
-          if (data.error.type === 'exceeded_current_quota_error' || data.error.code === 'insufficient_quota') {
-            throw new Error('❌ Sua conta Kimi está sem créditos. Recarregue em https://platform.moonshot.cn ou use outro modelo de IA.');
-          }
-          
-          throw new Error(`❌ Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`);
-        }
-
-        // Extrair conteúdo da resposta
-        resultText = data.choices?.[0]?.message?.content || '';
-        
-        if (!resultText || resultText.trim().length === 0) {
-          console.error('❌ Resposta do Kimi está vazia');
-          console.error('📦 Dados completos:', JSON.stringify(data));
-          throw new Error('❌ Kimi retornou uma resposta vazia. Tente novamente ou use outro modelo.');
-        }
-        
-        console.log('✅ Resposta do Kimi K2 recebida:', resultText.slice(0, 200));
-
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        
-        if (error.name === 'AbortError') {
-          console.error('⏱️ Timeout na API do Kimi após 180 segundos');
-          throw new Error('❌ A API do Kimi demorou muito para responder (timeout após 3 minutos). Tente: 1) Reduzir a quantidade de títulos (máximo 30), 2) Usar outro modelo de IA, ou 3) Tentar novamente em alguns minutos.');
-        }
-        
-        // Se já é um erro tratado acima, re-lançar
-        if (error.message.startsWith('❌')) {
-          throw error;
-        }
-        
-        // Erro de conexão ou outro erro não tratado
-        console.error('❌ Erro ao conectar com Kimi:', error.message);
-        throw new Error(`❌ Erro ao conectar com a API do Kimi: ${error.message}. Verifique sua conexão ou tente outro modelo.`);
-      }
 
     } else {
       throw new Error(`❌ Modelo de IA não suportado: ${aiModel}`);

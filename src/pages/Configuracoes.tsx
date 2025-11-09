@@ -4,8 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Cookie, Shield } from "lucide-react";
-import { CookieHelpDialog } from "@/components/CookieHelpDialog";
+import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Shield } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -30,16 +29,12 @@ const Configuracoes = () => {
   const [claudeKeys, setClaudeKeys] = useState<ApiKey[]>([]);
   const [openaiKeys, setOpenaiKeys] = useState<ApiKey[]>([]);
   const [huggingfaceKeys, setHuggingfaceKeys] = useState<ApiKey[]>([]);
-  const [kimiKeys, setKimiKeys] = useState<ApiKey[]>([]);
-  const [whiskCookie, setWhiskCookie] = useState('');
-  const [imagefxCookie, setImagefxCookie] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdminRole, setHasAdminRole] = useState(false);
   const { setupAdmin, isLoading: isSettingUpAdmin } = useSetupAdmin();
 
   useEffect(() => {
     loadUserData();
-    loadCookies();
     checkAdminRole();
   }, []);
 
@@ -90,8 +85,7 @@ const Configuracoes = () => {
         gemini: [] as ApiKey[],
         claude: [] as ApiKey[],
         openai: [] as ApiKey[],
-        huggingface: [] as ApiKey[],
-        kimi: [] as ApiKey[]
+        huggingface: [] as ApiKey[]
       };
 
       data?.forEach((key: any) => {
@@ -114,7 +108,6 @@ const Configuracoes = () => {
       setClaudeKeys(groupedKeys.claude);
       setOpenaiKeys(groupedKeys.openai);
       setHuggingfaceKeys(groupedKeys.huggingface);
-      setKimiKeys(groupedKeys.kimi);
     } catch (error: any) {
       console.error('Error loading API keys:', error);
     }
@@ -219,7 +212,6 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys([...claudeKeys, newKey]); break;
       case 'openai': setOpenaiKeys([...openaiKeys, newKey]); break;
       case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, newKey]); break;
-      case 'kimi': setKimiKeys([...kimiKeys, newKey]); break;
     }
   };
 
@@ -238,7 +230,6 @@ const Configuracoes = () => {
         case 'claude': setClaudeKeys(claudeKeys.filter(k => k.id !== id)); break;
         case 'openai': setOpenaiKeys(openaiKeys.filter(k => k.id !== id)); break;
         case 'huggingface': setHuggingfaceKeys(huggingfaceKeys.filter(k => k.id !== id)); break;
-        case 'kimi': setKimiKeys(kimiKeys.filter(k => k.id !== id)); break;
       }
     }
   };
@@ -252,121 +243,9 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys(updater(claudeKeys)); break;
       case 'openai': setOpenaiKeys(updater(openaiKeys)); break;
       case 'huggingface': setHuggingfaceKeys(updater(huggingfaceKeys)); break;
-      case 'kimi': setKimiKeys(updater(kimiKeys)); break;
     }
   };
 
-  const loadCookies = async () => {
-    try {
-      // Load Whisk cookie
-      const { data: whiskData } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { action: 'get', serviceName: 'whisk' }
-      });
-      if (whiskData?.cookie) {
-        setWhiskCookie(whiskData.cookie);
-      }
-
-      // Load ImageFX cookie
-      const { data: imagefxData } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { action: 'get', serviceName: 'imagefx' }
-      });
-      if (imagefxData?.cookie) {
-        setImagefxCookie(imagefxData.cookie);
-      }
-    } catch (error) {
-      console.error('Error loading cookies:', error);
-    }
-  };
-
-  const saveWhiskCookie = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { 
-          action: 'save', 
-          serviceName: 'whisk',
-          cookieValue: whiskCookie.trim()
-        }
-      });
-      
-      if (error) throw error;
-      
-      toast({ title: "Salvo!", description: "Whisk Cookie configurado com sucesso (criptografado)" });
-    } catch (error) {
-      console.error('Error saving Whisk cookie:', error);
-      toast({ 
-        title: "Erro", 
-        description: "Falha ao salvar cookie",
-        variant: "destructive" 
-      });
-    }
-  };
-
-  const saveImagefxCookie = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { 
-          action: 'save', 
-          serviceName: 'imagefx',
-          cookieValue: imagefxCookie.trim()
-        }
-      });
-      
-      if (error) throw error;
-      
-      toast({ title: "Salvo!", description: "ImageFX Cookie configurado com sucesso (criptografado)" });
-    } catch (error) {
-      console.error('Error saving ImageFX cookie:', error);
-      toast({ 
-        title: "Erro", 
-        description: "Falha ao salvar cookie",
-        variant: "destructive" 
-      });
-    }
-  };
-
-  const deleteWhiskCookie = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { action: 'delete', serviceName: 'whisk' }
-      });
-      
-      if (error) throw error;
-      
-      setWhiskCookie('');
-      toast({ title: "Removido", description: "Whisk Cookie deletado" });
-    } catch (error) {
-      console.error('Error deleting Whisk cookie:', error);
-      toast({ 
-        title: "Erro", 
-        description: "Falha ao deletar cookie",
-        variant: "destructive" 
-      });
-    }
-  };
-
-  const deleteImagefxCookie = async () => {
-    try {
-      const { error } = await supabase.functions.invoke('manage-service-cookie', {
-        body: { action: 'delete', serviceName: 'imagefx' }
-      });
-      
-      if (error) throw error;
-      
-      setImagefxCookie('');
-      toast({ title: "Removido", description: "ImageFX Cookie deletado" });
-    } catch (error) {
-      console.error('Error deleting ImageFX cookie:', error);
-      toast({ 
-        title: "Erro", 
-        description: "Falha ao deletar cookie",
-        variant: "destructive" 
-      });
-    }
-  };
-
-  const isCookieValid = (cookie: string) => {
-    return cookie.includes('=') && cookie.length > 20;
-  };
 
   const renderKeySection = (title: string, provider: string, keys: ApiKey[]) => (
     <Card className="p-6">
@@ -479,7 +358,6 @@ const Configuracoes = () => {
       {renderKeySection("Gemini API Keys", "gemini", geminiKeys)}
       {renderKeySection("Claude API Keys", "claude", claudeKeys)}
       {renderKeySection("OpenAI API Keys", "openai", openaiKeys)}
-      {renderKeySection("Kimi (Moonshot AI) API Keys", "kimi", kimiKeys)}
       
       <Card className="p-6 bg-primary/5 border-primary/20">
         <div className="space-y-4">
@@ -512,94 +390,6 @@ const Configuracoes = () => {
       </Card>
       
       {renderKeySection("HuggingFace Access Tokens", "huggingface", huggingfaceKeys)}
-
-      <Card className="p-6">
-        <div className="space-y-6">
-          <div className="flex items-start gap-3">
-            <Cookie className="h-6 w-6 text-muted-foreground mt-1" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold mb-1">🍪 Cookies para Geração de Imagens</h3>
-              <p className="text-sm text-muted-foreground">
-                Configure cookies do Whisk e ImageFX (experimental). Recomendamos usar Lovable AI.
-              </p>
-            </div>
-          </div>
-
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription>
-              <strong>⚠️ Cookies são experimentais</strong><br />
-              Recomendamos usar <strong>Lovable AI</strong> que não requer cookies e é mais confiável.
-            </AlertDescription>
-          </Alert>
-
-          {/* Whisk Cookie */}
-          <div className="space-y-3 border rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h4 className="font-semibold">Whisk Cookie</h4>
-                <Badge variant={whiskCookie && isCookieValid(whiskCookie) ? "default" : "secondary"}>
-                  {whiskCookie && isCookieValid(whiskCookie) ? "✅ Configurado" : "❌ Não Configurado"}
-                </Badge>
-              </div>
-              <CookieHelpDialog cookieType="whisk" />
-            </div>
-
-            <Textarea
-              placeholder="Cole todo o cookie aqui (formato: nome=valor; nome2=valor2)"
-              value={whiskCookie}
-              onChange={(e) => setWhiskCookie(e.target.value)}
-              className="font-mono text-xs min-h-[100px]"
-            />
-
-            <div className="flex gap-2">
-              <Button onClick={saveWhiskCookie} disabled={!whiskCookie.trim()}>
-                <Save className="h-4 w-4 mr-2" />
-                Salvar Whisk Cookie
-              </Button>
-              {whiskCookie && (
-                <Button variant="outline" onClick={deleteWhiskCookie}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Deletar
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {/* ImageFX Cookie */}
-          <div className="space-y-3 border rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h4 className="font-semibold">ImageFX Cookie</h4>
-                <Badge variant={imagefxCookie && isCookieValid(imagefxCookie) ? "default" : "secondary"}>
-                  {imagefxCookie && isCookieValid(imagefxCookie) ? "✅ Configurado" : "❌ Não Configurado"}
-                </Badge>
-              </div>
-              <CookieHelpDialog cookieType="imagefx" />
-            </div>
-
-            <Textarea
-              placeholder="Cole todo o cookie aqui (formato: nome=valor; nome2=valor2)"
-              value={imagefxCookie}
-              onChange={(e) => setImagefxCookie(e.target.value)}
-              className="font-mono text-xs min-h-[100px]"
-            />
-
-            <div className="flex gap-2">
-              <Button onClick={saveImagefxCookie} disabled={!imagefxCookie.trim()}>
-                <Save className="h-4 w-4 mr-2" />
-                Salvar ImageFX Cookie
-              </Button>
-              {imagefxCookie && (
-                <Button variant="outline" onClick={deleteImagefxCookie}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Deletar
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </Card>
     </div>
   );
 };
