@@ -204,9 +204,28 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
     // Limpar markdown se existir
     analysis = analysis.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
 
+    console.log('📄 Resposta bruta do Claude:', analysis.substring(0, 500));
+
     await updateApiKeyUsage(userId, provider, supabaseClient);
 
-    return new Response(JSON.stringify({ analysis: JSON.parse(analysis) }), {
+    // Tentar parsear o JSON com melhor tratamento de erro
+    let parsedAnalysis;
+    try {
+      parsedAnalysis = JSON.parse(analysis);
+    } catch (parseError: any) {
+      console.error('❌ Erro ao parsear JSON:', parseError.message);
+      console.error('📄 Conteúdo recebido:', analysis);
+      return new Response(JSON.stringify({ 
+        error: 'Falha ao processar resposta da IA',
+        details: `A IA retornou texto inválido. Por favor, tente novamente.`,
+        rawResponse: analysis.substring(0, 200)
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ analysis: parsedAnalysis }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
@@ -217,7 +236,11 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
       });
     }
     console.error('❌ ERRO:', error);
-    return new Response(JSON.stringify({ error: 'An error occurred processing your request' }), {
+    console.error('❌ Stack trace:', error.stack);
+    return new Response(JSON.stringify({ 
+      error: 'An error occurred processing your request',
+      details: error.message 
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
