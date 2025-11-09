@@ -25,6 +25,7 @@ import GuiaEdicao from "./pages/GuiaEdicao";
 import ConversorSRT from "./pages/ConversorSRT";
 import DivisorTexto from "./pages/DivisorTexto";
 import SubNicheHunter from "./pages/SubNicheHunter";
+import TitleAnalysis from "./pages/TitleAnalysis";
 import Configuracoes from "./pages/Configuracoes";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
@@ -133,6 +134,11 @@ const App = () => {
                 <Route path="/sub-niche-hunter" element={
                   <ProtectedRoute>
                     <SubNicheHunter />
+                  </ProtectedRoute>
+                } />
+                <Route path="/title-analysis" element={
+                  <ProtectedRoute>
+                    <TitleAnalysis />
                   </ProtectedRoute>
                 } />
                 <Route path="/configuracoes" element={
