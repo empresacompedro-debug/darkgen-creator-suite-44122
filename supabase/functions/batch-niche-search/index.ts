@@ -252,8 +252,8 @@ serve(async (req) => {
     minViews: 0,                // Sem mínimo ao invés de 5k
     maxVideoAge: 365,           // 1 ano ao invés de 60 dias
     minEngagement: 0,
-    videoDuration: 'medium',    // Médios e longos (4+ min)
-    minDuration: 480,           // 8+ minutos (480 segundos)
+    videoDuration: 'any',       // SEM limitação na busca inicial do YouTube
+    minDuration: 480,           // 8+ minutos (480 segundos) - filtro aplicado após
     maxChannelVideos: 10000,
     maxChannelAge: 3650,
     minViewSubRatio: 0
