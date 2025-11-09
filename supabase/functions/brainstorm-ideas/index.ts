@@ -33,17 +33,207 @@ serve(async (req) => {
     
     const body = await req.json();
     
-    // Validar apenas prompt livre
+    const battleMode = body.battleMode || false;
+    
+    // Validar prompt
     const errors = [
       ...validateString(body.prompt, 'prompt', { required: true, maxLength: 2000 }),
-      ...validateString(body.aiModel, 'aiModel', { required: true, maxLength: 50 }),
     ];
+    
+    if (!battleMode) {
+      errors.push(...validateString(body.aiModel, 'aiModel', { required: true, maxLength: 50 }));
+    }
+    
     validateOrThrow(errors);
     
     const userPrompt = sanitizeString(body.prompt);
-    const aiModel = body.aiModel;
+    const aiModel = battleMode ? null : body.aiModel;
 
-    console.log('Processing prompt:', { aiModel, promptLength: userPrompt.length });
+    console.log('Processing prompt:', { battleMode, aiModel, promptLength: userPrompt.length });
+    
+    // Modo batalha: detectar todas as IAs disponíveis
+    if (battleMode) {
+      const availableModels: Array<{provider: string, model: string, apiKey: string}> = [];
+      
+      // Verificar Claude
+      let claudeKey = '';
+      if (userId) {
+        const { data: keys } = await supabase
+          .from('user_api_keys')
+          .select('api_key_encrypted')
+          .eq('user_id', userId)
+          .eq('api_provider', 'anthropic')
+          .eq('is_active', true)
+          .limit(1);
+        
+        if (keys && keys.length > 0) {
+          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+            p_encrypted: keys[0].api_key_encrypted,
+            p_user_id: userId,
+          });
+          if (decrypted) claudeKey = decrypted as string;
+        }
+      }
+      if (!claudeKey) claudeKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+      if (claudeKey) availableModels.push({ provider: 'claude', model: 'claude-sonnet-4.5', apiKey: claudeKey });
+      
+      // Verificar Gemini
+      let geminiKey = '';
+      if (userId) {
+        const { data: keys } = await supabase
+          .from('user_api_keys')
+          .select('api_key_encrypted')
+          .eq('user_id', userId)
+          .eq('api_provider', 'google')
+          .eq('is_active', true)
+          .limit(1);
+        
+        if (keys && keys.length > 0) {
+          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+            p_encrypted: keys[0].api_key_encrypted,
+            p_user_id: userId,
+          });
+          if (decrypted) geminiKey = decrypted as string;
+        }
+      }
+      if (!geminiKey) geminiKey = Deno.env.get('GEMINI_API_KEY') || '';
+      if (geminiKey) availableModels.push({ provider: 'gemini', model: 'gemini-2.0-flash-exp', apiKey: geminiKey });
+      
+      // Verificar OpenAI
+      let openaiKey = '';
+      if (userId) {
+        const { data: keys } = await supabase
+          .from('user_api_keys')
+          .select('api_key_encrypted')
+          .eq('user_id', userId)
+          .eq('api_provider', 'openai')
+          .eq('is_active', true)
+          .limit(1);
+        
+        if (keys && keys.length > 0) {
+          const { data: decrypted } = await supabase.rpc('decrypt_api_key', {
+            p_encrypted: keys[0].api_key_encrypted,
+            p_user_id: userId,
+          });
+          if (decrypted) openaiKey = decrypted as string;
+        }
+      }
+      if (!openaiKey) openaiKey = Deno.env.get('OPENAI_API_KEY') || '';
+      if (openaiKey) availableModels.push({ provider: 'openai', model: 'gpt-4o-mini', apiKey: openaiKey });
+      
+      console.log(`🏆 Batalha iniciada com ${availableModels.length} IAs`);
+      
+      // Stream combinado de todas as IAs
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          
+          // Iniciar todas as chamadas simultaneamente
+          const streamPromises = availableModels.map(async ({ provider, model, apiKey }) => {
+            try {
+              let apiUrl = '';
+              let headers: Record<string, string> = { 'Content-Type': 'application/json' };
+              let requestBody: any = {};
+              
+              if (provider === 'claude') {
+                apiUrl = 'https://api.anthropic.com/v1/messages';
+                headers['x-api-key'] = apiKey;
+                headers['anthropic-version'] = '2023-06-01';
+                requestBody = {
+                  model,
+                  max_tokens: 8192,
+                  messages: [{ role: 'user', content: fullPrompt }],
+                  stream: true
+                };
+              } else if (provider === 'gemini') {
+                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+                requestBody = {
+                  contents: [{ parts: [{ text: fullPrompt }] }]
+                };
+              } else if (provider === 'openai') {
+                apiUrl = 'https://api.openai.com/v1/chat/completions';
+                headers['Authorization'] = `Bearer ${apiKey}`;
+                requestBody = {
+                  model,
+                  messages: [{ role: 'user', content: fullPrompt }],
+                  max_tokens: 8192,
+                  stream: true
+                };
+              }
+              
+              const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(requestBody)
+              });
+              
+              if (!response.ok || !response.body) return;
+              
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  
+                  let content = '';
+                  
+                  if (provider === 'claude' && line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    try {
+                      const parsed = JSON.parse(data);
+                      if (parsed.type === 'content_block_delta') {
+                        content = parsed.delta?.text || '';
+                      }
+                    } catch {}
+                  } else if (provider === 'gemini' && line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    try {
+                      const parsed = JSON.parse(data);
+                      content = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                    } catch {}
+                  } else if (provider === 'openai' && line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    try {
+                      const parsed = JSON.parse(data);
+                      content = parsed.choices?.[0]?.delta?.content || '';
+                    } catch {}
+                  }
+                  
+                  if (content) {
+                    const sseData = `data: ${JSON.stringify({ model, content })}\n\n`;
+                    controller.enqueue(encoder.encode(sseData));
+                  }
+                }
+              }
+            } catch (error) {
+              console.error(`Error streaming ${model}:`, error);
+            }
+          });
+          
+          await Promise.all(streamPromises);
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        }
+      });
+      
+      return new Response(stream, {
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+        },
+      });
+    }
 
     // System prompt conversacional
     const systemPrompt = `Você é um especialista em criação de conteúdo viral para YouTube e descoberta de nichos lucrativos.
