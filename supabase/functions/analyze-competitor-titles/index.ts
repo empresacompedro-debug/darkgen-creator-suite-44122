@@ -966,13 +966,14 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao analisar títulos';
     console.error('📤 Retornando erro ao cliente:', errorMessage);
     
+    const statusCode = /timeout|demorou muito para responder|timed out/i.test(errorMessage) ? 504 : 500;
     return new Response(
       JSON.stringify({ 
         error: errorMessage,
         details: error?.details || null
       }),
       { 
-        status: 500, 
+        status: statusCode, 
         headers: { 
           ...corsHeaders, 
           'Content-Type': 'application/json' 

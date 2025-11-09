@@ -440,10 +440,47 @@ const SubNicheHunter = () => {
       });
     } catch (error: any) {
       console.error('Error analyzing:', error);
+
+      const isKimi = selectedAIModel?.startsWith('kimi');
+      const maybeTimeout = typeof error?.message === 'string' && /timeout|demorou muito/i.test(error.message);
+
+      if (isKimi) {
+        toast({
+          title: "Kimi indisponível",
+          description: "Tentando automaticamente com Gemini 2.5 Flash...",
+        });
+        try {
+          const { data: dataFallback, error: errorFallback } = await supabase.functions.invoke('analyze-competitor-titles', {
+            body: { competitorData, aiModel: 'gemini-2.5-flash' }
+          });
+
+          if (errorFallback) throw errorFallback;
+
+          completeAnalysisProgress();
+          setAnalysisResult(dataFallback.result);
+          setVideosDetected(dataFallback.videosAnalyzed);
+
+          toast({
+            title: "Análise Concluída (Fallback)",
+            description: `${dataFallback.videosAnalyzed} vídeos analisados com Gemini 2.5 Flash`,
+          });
+          return; // Evita cair no tratamento de erro padrão
+        } catch (fbErr: any) {
+          console.error('Fallback Gemini falhou:', fbErr);
+          stopAnalysisProgress();
+          toast({
+            title: "Erro na análise",
+            description: fbErr.message || "Tente novamente",
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       stopAnalysisProgress();
       toast({
         title: "Erro na análise",
-        description: error.message || "Tente novamente",
+        description: error?.message || "Tente novamente",
         variant: "destructive",
       });
     } finally {
