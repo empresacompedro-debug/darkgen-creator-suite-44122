@@ -13,6 +13,7 @@ function getMaxTokensForModel(model: string): number {
   if (model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-')) {
     return 32000;
   }
+  if (model.includes('gpt-4-turbo') || model.includes('gpt-4.1')) return 4096;
   if (model.includes('gpt-4')) return 16384;
   if (model.includes('opus')) return 16384;
   if (model.includes('claude')) return 8192;
