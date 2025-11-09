@@ -225,7 +225,17 @@ IMPORTANTE:
       }
 
       const data = await response.json();
-      console.log('Gemini response received');
+      console.log('Gemini response received:', JSON.stringify(data, null, 2));
+      
+      if (!data.candidates || !data.candidates[0]) {
+        console.error('Invalid Gemini response structure:', data);
+        throw new Error('Invalid Gemini API response: missing candidates');
+      }
+      
+      if (!data.candidates[0].content || !data.candidates[0].content.parts || !data.candidates[0].content.parts[0]) {
+        console.error('Invalid Gemini content structure:', data.candidates[0]);
+        throw new Error('Invalid Gemini API response: missing content parts');
+      }
       
       const markdownReport = data.candidates[0].content.parts[0].text;
       analysis = { markdownReport };
