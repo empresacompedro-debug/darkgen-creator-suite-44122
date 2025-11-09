@@ -83,9 +83,10 @@ export async function updateApiKeyUsage(
   userId: string | undefined,
   provider: string,
   supabaseClient: any,
+  keyId?: string,
   quotaStatus?: any
 ) {
-  if (!userId) return;
+  if (!userId || !keyId || keyId === 'global') return;
   
   try {
     const updateData: any = {
@@ -99,8 +100,7 @@ export async function updateApiKeyUsage(
     await supabaseClient
       .from('user_api_keys')
       .update(updateData)
-      .eq('user_id', userId)
-      .eq('api_provider', provider);
+      .eq('id', keyId);
   } catch (error) {
     console.error('Error updating API key usage:', error);
   }
@@ -171,8 +171,8 @@ export async function executeWithKeyRotation<T>(
       const result = await executeRequest(keyData.key);
       
       // Update key usage on success
-      if (userId && currentKeyId !== 'global') {
-        await updateApiKeyUsage(userId, provider, supabaseClient);
+      if (userId && currentKeyId && currentKeyId !== 'global') {
+        await updateApiKeyUsage(userId, provider, supabaseClient, currentKeyId);
       }
       
       console.log(`✅ [Execute] Request successful with key ${currentKeyNumber || 'global'}/${totalKeys || '?'}`);

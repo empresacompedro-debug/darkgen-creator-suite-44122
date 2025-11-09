@@ -32,7 +32,9 @@ export async function getNextKeyRoundRobin(
     .eq('user_id', userId)
     .eq('api_provider', provider)
     .eq('is_active', true)
-    .order('priority', { ascending: true });
+    .order('last_used_at', { ascending: true, nullsFirst: true })
+    .order('priority', { ascending: true })
+    .order('id', { ascending: true });
 
   if (error) {
     console.error('❌ [Round-Robin] Erro ao buscar chaves:', error);
@@ -45,25 +47,23 @@ export async function getNextKeyRoundRobin(
   }
 
   console.log(`📊 [Round-Robin] ${keys.length} chaves ativas encontradas`);
+  if (keys[0]?.last_used_at) {
+    console.log(`🕒 [Round-Robin] Oldest last_used_at: ${keys[0].last_used_at}`);
+  } else {
+    console.log('🕒 [Round-Robin] Some keys have never been used (NULL last_used_at)');
+  }
 
-  // Determinar qual chave usar baseado em last_used_at
+  // Determinar qual chave usar baseado em last_used_at (NULL primeiro), depois priority e id
   // A chave que foi usada há mais tempo (ou nunca usada) será a próxima
-  let selectedKey: ApiKey;
-  let keyIndex = 0;
-
-  // Encontrar a chave menos recentemente usada
-  selectedKey = keys.reduce((oldest: ApiKey, current: ApiKey, index: number) => {
-    if (!oldest.last_used_at) return oldest;
-    if (!current.last_used_at) {
-      keyIndex = index;
-      return current;
-    }
-    if (new Date(current.last_used_at) < new Date(oldest.last_used_at)) {
-      keyIndex = index;
-      return current;
-    }
-    return oldest;
-  }, keys[0]);
+  let selectedKey: ApiKey = keys[0];
+  
+  // Calcular número de exibição estável com base em (priority ASC, id ASC)
+  const staticOrder = [...keys].sort((a: ApiKey, b: ApiKey) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.id.localeCompare(b.id);
+  });
+  const displayIndex = staticOrder.findIndex(k => k.id === selectedKey.id);
+  const keyIndex = Math.max(displayIndex, 0);
 
   console.log(`✅ [Round-Robin] Selecionada chave ${keyIndex + 1}/${keys.length} (priority: ${selectedKey.priority})`);
 
