@@ -885,17 +885,18 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
             inString = true;
             result += char;
           } else {
-            // Verificar se é o fim da string ou uma aspas interna
-            // É fim de string se: próximo char é : ou , ou } ou ] ou whitespace
-            const isEndOfString = /[\s,:}\]]/.test(nextChar);
+            // Procurar próximo caractere NÃO espaço para decidir se é fim de string
+            let j = i + 1;
+            while (j < repaired.length && /\s/.test(repaired[j])) j++;
+            const nextNonWs = repaired[j] || '';
+            const isEndOfString = nextNonWs === ',' || nextNonWs === '}' || nextNonWs === ']' || nextNonWs === ':';
             
             if (isEndOfString) {
-              // Fim da string
+              // Fim real da string JSON
               inString = false;
               result += char;
             } else {
-              // Aspas interna que precisa ser escapada
-              // Ex.: ...Said "No"...
+              // Aspas interna que precisa ser escapada (ex.: ...Said "No"...)
               result += '\\"';
             }
           }
