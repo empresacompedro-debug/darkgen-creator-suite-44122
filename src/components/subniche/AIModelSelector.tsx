@@ -32,15 +32,6 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       icon: <Sparkles className="h-3 w-3" />,
       maxVideos: 600
     },
-    { 
-      id: "claude-3-5-sonnet-20241022", 
-      name: "Claude 3.5 Sonnet", 
-      provider: "Anthropic",
-      description: "Rápido e inteligente - Requer API key",
-      requiresKey: true,
-      icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 500
-    },
     // Modelos Gemini
     { 
       id: "gemini-2.5-pro", 
