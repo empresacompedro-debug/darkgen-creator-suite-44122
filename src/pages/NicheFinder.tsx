@@ -18,6 +18,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
+// Niche Finder with automatic API key rotation
 const NicheFinder = () => {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
