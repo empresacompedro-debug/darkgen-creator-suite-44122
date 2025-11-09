@@ -221,7 +221,7 @@ IMPORTANTE:
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 8192,
+            maxOutputTokens: 65536,
           },
         }),
       });
@@ -274,7 +274,7 @@ IMPORTANTE:
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               contents: [{ role: 'user', parts: [{ text: compactPrompt }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+              generationConfig: { temperature: 0.7, maxOutputTokens: 65536 },
             }),
           });
 
