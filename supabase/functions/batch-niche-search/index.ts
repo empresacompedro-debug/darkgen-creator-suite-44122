@@ -17,7 +17,7 @@ async function getChannelDetails(channelId: string, apiKey: string) {
 }
 
 // Função auxiliar para buscar vídeos de um nicho
-async function searchNiche(niche: string, apiKey: string) {
+async function searchNiche(niche: string, apiKey: string, filters: any) {
   console.log(`🔍 Buscando nicho: "${niche}"`);
   
   let allVideoIds: string[] = [];
@@ -30,8 +30,19 @@ async function searchNiche(niche: string, apiKey: string) {
     searchUrl.searchParams.append('part', 'snippet');
     searchUrl.searchParams.append('q', niche);
     searchUrl.searchParams.append('type', 'video');
-    searchUrl.searchParams.append('videoDuration', 'long'); // 20+ minutos
-    searchUrl.searchParams.append('publishedAfter', new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString());
+    
+    // Usar filtros dinâmicos ao invés de hardcoded
+    if (filters.videoDuration === 'long') {
+      searchUrl.searchParams.append('videoDuration', 'long');
+    } else if (filters.videoDuration === 'medium') {
+      searchUrl.searchParams.append('videoDuration', 'medium');
+    } else if (filters.videoDuration === 'short') {
+      searchUrl.searchParams.append('videoDuration', 'short');
+    }
+    // Se 'any', não adicionar o parâmetro
+    
+    const daysAgo = new Date(Date.now() - filters.maxVideoAge * 24 * 60 * 60 * 1000).toISOString();
+    searchUrl.searchParams.append('publishedAfter', daysAgo);
     searchUrl.searchParams.append('order', 'viewCount');
     searchUrl.searchParams.append('maxResults', '50');
     if (pageToken) {
@@ -139,15 +150,59 @@ async function searchNiche(niche: string, apiKey: string) {
     })
   );
 
-  // Filtrar vídeos que atendem aos critérios (filtros mais relaxados)
-  const filtered = processedVideos.filter(video => 
-    video.subscriberCount <= 100000 &&  // Canal até 100k inscritos
-    video.viewCount >= 5000 &&          // Vídeo com 5k+ visualizações (relaxado)
-    video.durationSeconds >= 600 &&     // 10+ minutos
-    video.ageInDays <= 60               // Últimos 2 meses
-  );
+  // Aplicar filtros dinâmicos do usuário
+  const filtered = processedVideos.filter(video => {
+    // Filtro de inscritos
+    if (filters.maxSubscribers && video.subscriberCount > filters.maxSubscribers) {
+      return false;
+    }
+    if (filters.minSubscribers && video.subscriberCount < filters.minSubscribers) {
+      return false;
+    }
+    
+    // Filtro de views
+    if (filters.minViews && video.viewCount < filters.minViews) {
+      return false;
+    }
+    
+    // Filtro de idade do vídeo
+    if (filters.maxVideoAge && video.ageInDays > filters.maxVideoAge) {
+      return false;
+    }
+    
+    // Filtro de engagement
+    if (filters.minEngagement && video.engagement < filters.minEngagement) {
+      return false;
+    }
+    
+    // Filtro de duração do vídeo
+    const minDuration = filters.videoDuration === 'long' ? 1200 :   // 20+ min
+                        filters.videoDuration === 'medium' ? 240 :   // 4-20 min
+                        filters.videoDuration === 'short' ? 0 : 0;   // <4 min ou any
+    if (video.durationSeconds < minDuration) {
+      return false;
+    }
+    
+    // Filtro de ratio views/subs
+    if (filters.minViewSubRatio && video.viewSubRatio < filters.minViewSubRatio) {
+      return false;
+    }
+    
+    // Filtro de idade do canal
+    if (filters.maxChannelAge && video.channelAgeInDays && 
+        video.channelAgeInDays > filters.maxChannelAge) {
+      return false;
+    }
+    
+    return true;
+  });
 
-  console.log(`📊 Nicho "${niche}": ${allVideoIds.length} vídeos buscados, ${allVideos.length} detalhados, ${filtered.length} após filtros`);
+  console.log(`📊 Nicho "${niche}":`);
+  console.log(`   → ${allVideoIds.length} IDs encontrados na busca`);
+  console.log(`   → ${allVideos.length} vídeos detalhados`);
+  console.log(`   → ${processedVideos.length} vídeos processados`);
+  console.log(`   → ${filtered.length} após aplicar filtros`);
+  console.log(`   → Retornando top ${Math.min(filtered.length, 500)}`);
 
   // Retornar top 500 vídeos após filtros
   return filtered
@@ -176,7 +231,7 @@ serve(async (req) => {
       });
     }
 
-    const { nichesBatch, batchSearchId } = await req.json();
+    const { nichesBatch, batchSearchId, filters = {} } = await req.json();
 
     if (!nichesBatch || !Array.isArray(nichesBatch) || nichesBatch.length === 0) {
       return new Response(JSON.stringify({ error: 'Lista de nichos inválida' }), {
@@ -185,7 +240,22 @@ serve(async (req) => {
       });
     }
 
+    // Valores padrão MUITO MAIS RELAXADOS para garantir resultados
+    const defaultFilters = {
+      maxSubscribers: 1000000,    // 1M ao invés de 100k
+      minSubscribers: 0,
+      minViews: 0,                // Sem mínimo ao invés de 5k
+      maxVideoAge: 365,           // 1 ano ao invés de 60 dias
+      minEngagement: 0,
+      videoDuration: 'any',       // Qualquer duração ao invés de 'long'
+      maxChannelVideos: 10000,
+      maxChannelAge: 3650,
+      minViewSubRatio: 0
+    };
+
+    const appliedFilters = { ...defaultFilters, ...filters };
     console.log(`📦 Processando batch de ${nichesBatch.length} nichos`);
+    console.log(`📊 Filtros aplicados no batch:`, appliedFilters);
 
     // Buscar chave de API do YouTube (com descriptografia automática)
     const apiKeyInfo = await getApiKey(user.id, 'youtube', supabase);
@@ -207,7 +277,7 @@ serve(async (req) => {
     for (let i = 0; i < nichesBatch.length; i += 5) {
       const batch = nichesBatch.slice(i, i + 5);
       const batchResults = await Promise.all(
-        batch.map(niche => searchNiche(niche, youtubeApiKey).catch(err => {
+        batch.map(niche => searchNiche(niche, youtubeApiKey, appliedFilters).catch(err => {
           console.error(`Erro ao processar nicho "${niche}":`, err);
           return [];
         }))

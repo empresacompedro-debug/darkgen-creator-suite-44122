@@ -553,7 +553,18 @@ const NicheFinder = () => {
         } = await supabase.functions.invoke('batch-niche-search', {
           body: {
             nichesBatch: batch,
-            batchSearchId: batchSearch.id
+            batchSearchId: batchSearch.id,
+            filters: {
+              maxSubscribers: parseInt(maxSubscribers) || 1000000,
+              minSubscribers: parseInt(minSubscribers) || 0,
+              minViews: parseInt(minViews) || 0,
+              maxVideoAge: parseInt(maxVideoAge) || 365,
+              minEngagement: parseFloat(minEngagement) || 0,
+              videoDuration: videoDuration || 'any',
+              maxChannelVideos: parseInt(maxChannelVideos) || 10000,
+              maxChannelAge: parseInt(maxChannelAge) || 3650,
+              minViewSubRatio: parseFloat(minViewSubRatio) || 0
+            }
           }
         });
         if (error) {
