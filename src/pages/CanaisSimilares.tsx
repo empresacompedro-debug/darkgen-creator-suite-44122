@@ -629,8 +629,7 @@ const CanaisSimilares = () => {
               recentTitles: channelDetails.recentTitles || [],
               keywords: channelDetails.keywords || '',
               contentType: 'unknown'
-            },
-            aiModel: selectedAiModel
+            }
           }
         });
 

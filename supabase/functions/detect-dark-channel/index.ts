@@ -59,7 +59,30 @@ Baseado nos dados fornecidos, responda APENAS com um JSON neste formato exato:
 
     console.log('Sending request to Lovable AI...');
     
-    const modelToUse = aiModel || 'google/gemini-2.5-flash';
+    // Normalize and validate model; default to supported Gemini if invalid
+    const aliasMap: Record<string, string> = {
+      'gemini-2.5-flash': 'google/gemini-2.5-flash',
+      'gemini-2.5-pro': 'google/gemini-2.5-pro',
+      'gpt-5': 'openai/gpt-5',
+      'gpt-5-mini': 'openai/gpt-5-mini',
+      'gpt-5-nano': 'openai/gpt-5-nano',
+      'claude-sonnet-4.5': 'google/gemini-2.5-flash', // hard fallback
+      'claude-sonnet-4': 'google/gemini-2.5-flash',
+      'claude-sonnet-3.5': 'google/gemini-2.5-flash'
+    };
+
+    const allowedModels = new Set([
+      'openai/gpt-5-mini',
+      'openai/gpt-5',
+      'openai/gpt-5-nano',
+      'google/gemini-2.5-pro',
+      'google/gemini-2.5-flash',
+      'google/gemini-2.5-flash-lite',
+      'google/gemini-2.5-flash-image'
+    ]);
+
+    const normalized = aiModel ? (aliasMap[aiModel] || aiModel) : undefined;
+    const modelToUse = normalized && allowedModels.has(normalized) ? normalized : 'google/gemini-2.5-flash';
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
