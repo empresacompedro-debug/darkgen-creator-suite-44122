@@ -36,7 +36,7 @@ const navigation = [{
   stepInfo: "Etapa 2",
   submenu: [{
     name: "📊 Análise de Títulos",
-    href: "/sub-niche-hunter",
+    href: "/title-analysis",
     step: 4
   }, {
     name: "🔍 Expansão de Nicho",
