@@ -7,75 +7,137 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Função auxiliar para buscar detalhes do canal
-async function getChannelDetails(channelId: string, apiKey: string) {
-  const url = `https://www.googleapis.com/youtube/v3/channels?part=statistics,snippet&id=${channelId}&key=${apiKey}`;
-  const response = await fetch(url);
-  if (!response.ok) return null;
-  const data = await response.json();
-  return data.items?.[0] || null;
-}
-
-// Função auxiliar para buscar vídeos de um nicho
-async function searchNiche(niche: string, apiKey: string, filters: any) {
+// Função auxiliar para buscar vídeos de um nicho com rotação automática de chaves
+async function searchNiche(niche: string, userId: string, supabaseClient: any, filters: any) {
   console.log(`🔍 Buscando nicho: "${niche}"`);
   
   let allVideoIds: string[] = [];
   let pageToken: string | undefined = undefined;
-  const maxPages = 50; // 50 páginas x 50 = 2500 vídeos buscados
+  const maxPages = filters.maxPages || 10; // Configurável pelo usuário
   
-  // Buscar múltiplas páginas para obter mais resultados
+  // Buscar múltiplas páginas com rotação automática de chaves
   for (let page = 0; page < maxPages; page++) {
-    const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
-    searchUrl.searchParams.append('part', 'snippet');
-    searchUrl.searchParams.append('q', niche);
-    searchUrl.searchParams.append('type', 'video');
-    
-    // NÃO aplicar filtro de duração na busca do YouTube - buscar TUDO
-    // O filtro de 8+ minutos será aplicado DEPOIS no processamento
-    // Se 'any', não adicionar o parâmetro de duração
-    
-    const daysAgo = new Date(Date.now() - filters.maxVideoAge * 24 * 60 * 60 * 1000).toISOString();
-    searchUrl.searchParams.append('publishedAfter', daysAgo);
-    searchUrl.searchParams.append('order', 'viewCount');
-    searchUrl.searchParams.append('maxResults', '50');
-    if (pageToken) {
-      searchUrl.searchParams.append('pageToken', pageToken);
-    }
-    searchUrl.searchParams.append('key', apiKey);
+    try {
+      const searchData = await executeWithKeyRotation(
+        userId,
+        'youtube',
+        supabaseClient,
+        async (apiKey) => {
+          const searchUrl = new URL('https://www.googleapis.com/youtube/v3/search');
+          searchUrl.searchParams.append('part', 'snippet');
+          searchUrl.searchParams.append('q', niche);
+          searchUrl.searchParams.append('type', 'video');
+          searchUrl.searchParams.append('order', 'viewCount');
+          searchUrl.searchParams.append('maxResults', '50');
+          if (pageToken) {
+            searchUrl.searchParams.append('pageToken', pageToken);
+          }
+          searchUrl.searchParams.append('key', apiKey);
 
-    const searchResponse = await fetch(searchUrl.toString());
-    if (!searchResponse.ok) {
-      console.error(`Erro ao buscar nicho "${niche}" (página ${page + 1}):`, searchResponse.status);
-      break;
-    }
+          const response = await fetch(searchUrl.toString());
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Erro na página ${page + 1}:`, response.status, errorText);
+            
+            if (response.status === 403) {
+              throw new Error(`Quota exceeded: ${errorText}`);
+            }
+            
+            return { items: [], nextPageToken: null };
+          }
 
-    const searchData = await searchResponse.json();
-    const videoIds = searchData.items?.map((item: any) => item.id.videoId).filter(Boolean) || [];
-    allVideoIds.push(...videoIds);
-    
-    pageToken = searchData.nextPageToken;
-    if (!pageToken) break; // Não há mais páginas
+          return await response.json();
+        },
+        3
+      );
+      
+      const videoIds = searchData.items?.map((item: any) => item.id.videoId).filter(Boolean) || [];
+      allVideoIds.push(...videoIds);
+      
+      pageToken = searchData.nextPageToken;
+      if (!pageToken) break;
+      
+      if (page < maxPages - 1 && pageToken) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+    } catch (error: any) {
+      console.error(`❌ Erro ao buscar página ${page + 1} do nicho "${niche}":`, error.message);
+      
+      if (error.message.includes('Todas as chaves')) {
+        console.error(`🚫 Todas as chaves esgotadas. Parando busca.`);
+        break;
+      }
+      
+      continue;
+    }
   }
 
   if (allVideoIds.length === 0) return [];
 
-  // Buscar detalhes dos vídeos em lotes de 50 (limite da API)
+  // Buscar detalhes dos vídeos em lotes de 50 com rotação de chaves
   const allVideos: any[] = [];
   for (let i = 0; i < allVideoIds.length; i += 50) {
-    const batchIds = allVideoIds.slice(i, i + 50);
-    const videosUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${batchIds.join(',')}&key=${apiKey}`;
-    const videosResponse = await fetch(videosUrl);
-    if (!videosResponse.ok) continue;
-
-    const videosData = await videosResponse.json();
-    allVideos.push(...(videosData.items || []));
+    try {
+      const batchIds = allVideoIds.slice(i, i + 50);
+      
+      const videosData = await executeWithKeyRotation(
+        userId,
+        'youtube',
+        supabaseClient,
+        async (apiKey) => {
+          const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${batchIds.join(',')}&key=${apiKey}`;
+          const response = await fetch(url);
+          
+          if (!response.ok) {
+            if (response.status === 403) {
+              throw new Error('Quota exceeded');
+            }
+            return { items: [] };
+          }
+          
+          return await response.json();
+        },
+        3
+      );
+      
+      allVideos.push(...(videosData.items || []));
+    } catch (error) {
+      console.error(`Erro ao buscar detalhes do batch ${i}-${i+50}:`, error);
+      continue;
+    }
   }
 
-  // Processar cada vídeo e buscar dados do canal
+  // Processar cada vídeo e buscar dados do canal com rotação de chaves
   const processedVideos = await Promise.all(
     allVideos.map(async (video: any) => {
-      const channelStats = await getChannelDetails(video.snippet.channelId, apiKey);
+      let channelStats = null;
+      
+      try {
+        channelStats = await executeWithKeyRotation(
+          userId,
+          'youtube',
+          supabaseClient,
+          async (apiKey) => {
+            const url = `https://www.googleapis.com/youtube/v3/channels?part=statistics,snippet&id=${video.snippet.channelId}&key=${apiKey}`;
+            const response = await fetch(url);
+            
+            if (!response.ok) {
+              if (response.status === 403) {
+                throw new Error('Quota exceeded');
+              }
+              return null;
+            }
+            
+            const data = await response.json();
+            return data.items?.[0] || null;
+          },
+          3
+        );
+      } catch (error) {
+        console.error(`Erro ao buscar canal ${video.snippet.channelId}:`, error);
+      }
       
       // Parse duration (formato ISO 8601: PT20M13S)
       const durationMatch = video.contentDetails.duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
@@ -199,43 +261,31 @@ serve(async (req) => {
 
   // Valores padrão ULTRA-SIMPLES: APENAS duração 8+ minutos
   const defaultFilters = {
-    minDuration: 480,           // 8+ minutos (480 segundos) - ÚNICO FILTRO
-    videoDuration: 'any',       // Não limitar na busca do YouTube
-    maxVideoAge: 365,           // 1 ano para buscar mais vídeos
+    minDuration: 480,      // ÚNICO FILTRO: 8+ minutos
+    videoDuration: 'any',  // Não limitar
+    maxPages: 10           // 10 páginas = ~500 vídeos, 1.250 quota
   };
 
     const appliedFilters = { ...defaultFilters, ...filters };
     console.log(`📦 Processando batch de ${nichesBatch.length} nichos`);
     console.log(`📊 Filtros aplicados no batch:`, appliedFilters);
 
-    // Buscar chave de API do YouTube (com descriptografia automática)
-    const apiKeyInfo = await getApiKey(user.id, 'youtube', supabase);
-
-    if (!apiKeyInfo) {
-      return new Response(JSON.stringify({ error: 'Chave de API do YouTube não configurada' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    console.log(`🔑 Usando chave do YouTube: ${apiKeyInfo.keyId || 'global'}`);
-    const youtubeApiKey = apiKeyInfo.key;
-
-    // Processar nichos em paralelo (5 por vez)
+    // Processar nichos em paralelo (5 por vez) com rotação automática de chaves
     const allResults: any[] = [];
     let quotaUsed = 0;
 
     for (let i = 0; i < nichesBatch.length; i += 5) {
       const batch = nichesBatch.slice(i, i + 5);
       const batchResults = await Promise.all(
-        batch.map(niche => searchNiche(niche, youtubeApiKey, appliedFilters).catch(err => {
+        batch.map(niche => searchNiche(niche, user.id, supabase, appliedFilters).catch(err => {
           console.error(`Erro ao processar nicho "${niche}":`, err);
           return [];
         }))
       );
 
-      // Quota: search=100, videos=1, channels=1 por nicho = ~1250 por nicho (50 páginas)
-      quotaUsed += batch.length * 1250;
+      // Quota: search=100 + videos=1 + channels=1 por página = ~125 por página
+      const quotaPerNiche = appliedFilters.maxPages * 125;
+      quotaUsed += batch.length * quotaPerNiche;
 
       allResults.push(...batchResults.flat());
     }

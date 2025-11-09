@@ -50,6 +50,7 @@ const NicheFinder = () => {
   const [showManual, setShowManual] = useState(false);
   const [showNicheLists, setShowNicheLists] = useState(false);
   const [aiModel, setAiModel] = useState("gemini-2.5-flash");
+  const [maxPagesPerNiche, setMaxPagesPerNiche] = useState(10);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -391,6 +392,46 @@ const NicheFinder = () => {
             </p>
           </div>
           <AIModelSelector value={aiModel} onChange={setAiModel} />
+        </div>
+      </Card>
+
+      {/* Controle de Páginas por Nicho */}
+      <Card className="p-6">
+        <div className="space-y-4">
+          <div>
+            <Label className="text-base font-semibold">⚙️ Páginas por Nicho</Label>
+            <p className="text-sm text-muted-foreground mb-2">
+              Controle quantas páginas buscar para economizar quota da API
+            </p>
+          </div>
+          <Select 
+            value={maxPagesPerNiche.toString()} 
+            onValueChange={(v) => setMaxPagesPerNiche(Number(v))}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="5">
+                5 páginas (~250 vídeos, 625 quota/nicho)
+              </SelectItem>
+              <SelectItem value="10">
+                10 páginas (~500 vídeos, 1.250 quota/nicho) - Recomendado
+              </SelectItem>
+              <SelectItem value="20">
+                20 páginas (~1000 vídeos, 2.500 quota/nicho)
+              </SelectItem>
+              <SelectItem value="50">
+                50 páginas (~2500 vídeos, 6.250 quota/nicho) - Alto consumo!
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground space-y-1 p-3 bg-muted/50 rounded-md">
+            <p>💡 <strong>Com 18 chaves configuradas:</strong></p>
+            <p>• Total disponível: <strong>180.000 quota points/dia</strong></p>
+            <p>• Com 10 páginas: <strong>~144 nichos/dia</strong></p>
+            <p>• Com 5 páginas: <strong>~288 nichos/dia</strong></p>
+          </div>
         </div>
       </Card>
 
