@@ -31,15 +31,9 @@ async function searchNiche(niche: string, apiKey: string, filters: any) {
     searchUrl.searchParams.append('q', niche);
     searchUrl.searchParams.append('type', 'video');
     
-    // Usar filtros dinâmicos ao invés de hardcoded
-    if (filters.videoDuration === 'long') {
-      searchUrl.searchParams.append('videoDuration', 'long');
-    } else if (filters.videoDuration === 'medium') {
-      searchUrl.searchParams.append('videoDuration', 'medium');
-    } else if (filters.videoDuration === 'short') {
-      searchUrl.searchParams.append('videoDuration', 'short');
-    }
-    // Se 'any', não adicionar o parâmetro
+    // NÃO aplicar filtro de duração na busca do YouTube - buscar TUDO
+    // O filtro de 8+ minutos será aplicado DEPOIS no processamento
+    // Se 'any', não adicionar o parâmetro de duração
     
     const daysAgo = new Date(Date.now() - filters.maxVideoAge * 24 * 60 * 60 * 1000).toISOString();
     searchUrl.searchParams.append('publishedAfter', daysAgo);
@@ -150,52 +144,10 @@ async function searchNiche(niche: string, apiKey: string, filters: any) {
     })
   );
 
-  // Aplicar filtros dinâmicos do usuário
+  // Aplicar filtros dinâmicos do usuário - APENAS duração mínima
   const filtered = processedVideos.filter(video => {
-    // Filtro de inscritos
-    if (filters.maxSubscribers && video.subscriberCount > filters.maxSubscribers) {
-      return false;
-    }
-    if (filters.minSubscribers && video.subscriberCount < filters.minSubscribers) {
-      return false;
-    }
-    
-    // Filtro de views
-    if (filters.minViews && video.viewCount < filters.minViews) {
-      return false;
-    }
-    
-    // Filtro de idade do vídeo
-    if (filters.maxVideoAge && video.ageInDays > filters.maxVideoAge) {
-      return false;
-    }
-    
-    // Filtro de engagement
-    if (filters.minEngagement && video.engagement < filters.minEngagement) {
-      return false;
-    }
-    
-    // Filtro de duração mínima em segundos
+    // ÚNICO FILTRO: Duração mínima em segundos (8+ minutos = 480 segundos)
     if (filters.minDuration && video.durationSeconds < filters.minDuration) {
-      return false;
-    }
-    
-    // Filtro de duração do vídeo (categorias)
-    const minDuration = filters.videoDuration === 'long' ? 1200 :   // 20+ min
-                        filters.videoDuration === 'medium' ? 240 :   // 4-20 min
-                        filters.videoDuration === 'short' ? 0 : 0;   // <4 min ou any
-    if (video.durationSeconds < minDuration) {
-      return false;
-    }
-    
-    // Filtro de ratio views/subs
-    if (filters.minViewSubRatio && video.viewSubRatio < filters.minViewSubRatio) {
-      return false;
-    }
-    
-    // Filtro de idade do canal
-    if (filters.maxChannelAge && video.channelAgeInDays && 
-        video.channelAgeInDays > filters.maxChannelAge) {
       return false;
     }
     
@@ -245,18 +197,11 @@ serve(async (req) => {
       });
     }
 
-  // Valores padrão MUITO MAIS RELAXADOS para garantir resultados
+  // Valores padrão ULTRA-SIMPLES: APENAS duração 8+ minutos
   const defaultFilters = {
-    maxSubscribers: 1000000,    // 1M ao invés de 100k
-    minSubscribers: 0,
-    minViews: 0,                // Sem mínimo ao invés de 5k
-    maxVideoAge: 365,           // 1 ano ao invés de 60 dias
-    minEngagement: 0,
-    videoDuration: 'any',       // SEM limitação na busca inicial do YouTube
-    minDuration: 480,           // 8+ minutos (480 segundos) - filtro aplicado após
-    maxChannelVideos: 10000,
-    maxChannelAge: 3650,
-    minViewSubRatio: 0
+    minDuration: 480,           // 8+ minutos (480 segundos) - ÚNICO FILTRO
+    videoDuration: 'any',       // Não limitar na busca do YouTube
+    maxVideoAge: 365,           // 1 ano para buscar mais vídeos
   };
 
     const appliedFilters = { ...defaultFilters, ...filters };
