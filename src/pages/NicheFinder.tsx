@@ -259,8 +259,8 @@ const NicheFinder = () => {
 
         const { data, error } = await supabase.functions.invoke('detect-dark-channel', {
           body: { 
-            channelData,
-            aiModel: aiModel // Usar modelo selecionado
+            channelData
+            // Uses default google/gemini-2.5-flash model in edge function
           }
         });
 
