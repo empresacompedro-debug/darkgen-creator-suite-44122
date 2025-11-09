@@ -249,7 +249,8 @@ IMPORTANTE:
         throw new Error('Gemini não retornou texto (possível bloqueio de segurança). Tente ajustar o prompt ou reduzir os dados.');
       }
       
-      analysis = { markdownReport };
+    } else if (aiModel.includes('gpt')) {
+      apiUrl = 'https://api.openai.com/v1/chat/completions';
       
       // OpenAI request with user-specific key retrieval and simple rotation
       // Helper to fetch and decrypt the user's current OpenAI key
@@ -366,10 +367,12 @@ IMPORTANTE:
         break;
       }
 
-      if (!analysis) {
+      if (!analysis.markdownReport) {
         throw new Error(lastErrorText || 'Falha ao obter resposta do OpenAI');
       }
-      throw new Error('Modelo não suportado');
+      
+    } else {
+      throw new Error(`Modelo não suportado: ${aiModel}`);
     }
 
     console.log('Analysis parsed successfully');
@@ -378,6 +381,10 @@ IMPORTANTE:
     if (userId) {
       console.log('Saving analysis to database...');
       
+      // Count videos in rawData (simple heuristic: count "visualizações" occurrences)
+      const videosCount = (rawData.match(/visualizações/gi) || []).length;
+      console.log(`Contados ${videosCount} vídeos no rawData`);
+      
       const { error: insertError } = await supabase
         .from('title_analyses')
         .insert({
@@ -385,6 +392,7 @@ IMPORTANTE:
           raw_data: rawData,
           ai_model: aiModel,
           analysis_result: analysis,
+          videos_count: videosCount,
         });
 
       if (insertError) {
