@@ -5,6 +5,8 @@ import { getApiKey, updateApiKeyUsage } from '../_shared/get-api-key.ts';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 };
 
 interface VideoData {
@@ -196,8 +198,13 @@ serve(async (req) => {
         return 600;
       }
       
-      // GPT-4.1, GPT-4o, Kimi K2: 128K tokens = ~450 vídeos
-      if (model.includes('gpt-4') || model.includes('kimi')) {
+      // Kimi K2: Limite reduzido para 30 vídeos para evitar crash da edge function
+      if (model.includes('kimi')) {
+        return 30;
+      }
+      
+      // GPT-4.1, GPT-4o: 128K tokens = ~450 vídeos
+      if (model.includes('gpt-4')) {
         return 450;
       }
       
@@ -695,6 +702,15 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
 
       const apiKey = apiKeyResult.key;
       console.log(`✅ Usando chave do usuário para Kimi`);
+
+      // Validar tamanho do prompt ANTES de criar o payload
+      const promptSizeKb = new TextEncoder().encode(prompt).length / 1024;
+      console.log(`📏 Tamanho do prompt: ${promptSizeKb.toFixed(2)} KB`);
+
+      if (promptSizeKb > 100) {
+        console.error(`❌ Prompt muito grande para Kimi: ${promptSizeKb.toFixed(2)} KB`);
+        throw new Error('❌ Muitos vídeos para processar com Kimi. Reduza a quantidade de títulos (máximo 30 vídeos) ou use outro modelo de IA (Claude, Gemini, GPT).');
+      }
 
       // Kimi usa endpoint compatível com OpenAI (tentar .ai e fallback para .cn)
       const kimiModel = aiModel === 'kimi-k2-thinking' ? 'kimi-k2-thinking' : 'kimi-k2-turbo-preview';
