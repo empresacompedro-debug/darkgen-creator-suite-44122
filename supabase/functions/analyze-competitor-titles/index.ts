@@ -619,6 +619,7 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
           if (data.candidates?.[0]?.finishReason === 'MAX_TOKENS') {
             console.error('⚠️ ATENÇÃO: Resposta truncada! O modelo atingiu o limite de tokens.');
             console.error('💡 Considere: 1) Reduzir a quantidade de vídeos ou 2) Usar um prompt mais conciso');
+            throw new Error('⚠️ A análise foi interrompida por exceder o limite de tokens. Tente com menos vídeos (máximo 20) ou use o modelo Claude que tem maior capacidade.');
           }
           
           // VALIDAÇÃO: Verificar se a resposta contém os dados esperados
@@ -784,16 +785,69 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
     console.log('🧹 JSON limpo (primeiros 500 chars):', resultText.slice(0, 500));
     console.log('🧹 JSON limpo (últimos 200 chars):', resultText.slice(-200));
     
+    // Função helper para reparar JSON truncado/malformado
+    function repairJSON(jsonStr: string): string {
+      let repaired = jsonStr;
+      
+      // Conta abertura e fechamento de arrays e objetos
+      const openBraces = (repaired.match(/{/g) || []).length;
+      const closeBraces = (repaired.match(/}/g) || []).length;
+      const openBrackets = (repaired.match(/\[/g) || []).length;
+      const closeBrackets = (repaired.match(/]/g) || []).length;
+      
+      console.log('🔧 Análise JSON:', { openBraces, closeBraces, openBrackets, closeBrackets });
+      
+      // Remove vírgulas antes de ] ou }
+      repaired = repaired.replace(/,(\s*[\]}])/g, '$1');
+      
+      // Remove trailing comma no final (antes do último })
+      repaired = repaired.replace(/,(\s*)$/, '$1');
+      
+      // Se há arrays/objetos abertos, tenta fechar
+      if (openBrackets > closeBrackets) {
+        const diff = openBrackets - closeBrackets;
+        console.log(`🔧 Fechando ${diff} arrays não fechados`);
+        repaired += ']'.repeat(diff);
+      }
+      
+      if (openBraces > closeBraces) {
+        const diff = openBraces - closeBraces;
+        console.log(`🔧 Fechando ${diff} objetos não fechados`);
+        repaired += '}'.repeat(diff);
+      }
+      
+      return repaired;
+    }
+    
     let result;
     try {
       result = JSON.parse(resultText);
+      console.log('✅ JSON parseado com sucesso na primeira tentativa');
     } catch (parseError: any) {
-      console.error('❌ Erro ao fazer parse do JSON:', parseError.message);
-      console.error('📄 JSON completo que falhou:', resultText);
-      throw new Error(`Falha ao fazer parse da resposta: ${parseError.message}`);
+      console.log('⚠️ Primeira tentativa de parse falhou, tentando reparar JSON...');
+      console.error('📄 Erro:', parseError.message);
+      
+      try {
+        const repairedText = repairJSON(resultText);
+        console.log('🔧 JSON reparado (últimos 200 chars):', repairedText.slice(-200));
+        result = JSON.parse(repairedText);
+        console.log('✅ JSON parseado com sucesso após reparo');
+      } catch (repairError: any) {
+        console.error('❌ Erro ao fazer parse do JSON mesmo após reparo:', repairError.message);
+        console.error('📄 JSON completo que falhou:', resultText);
+        console.error('📄 Posição do erro:', repairError.message.match(/position (\d+)/)?.[1] || 'desconhecida');
+        
+        // Tenta identificar o problema específico
+        const errorPos = parseInt(repairError.message.match(/position (\d+)/)?.[1] || '0');
+        if (errorPos > 0) {
+          const context = resultText.substring(Math.max(0, errorPos - 100), Math.min(resultText.length, errorPos + 100));
+          console.error('📍 Contexto do erro:', context);
+        }
+        
+        throw new Error(`Falha ao fazer parse da resposta: ${repairError.message}. O modelo retornou um JSON malformado. Tente novamente ou use outro modelo.`);
+      }
     }
     
-    console.log('✅ JSON parseado com sucesso');
     console.log('📊 Estrutura do resultado:', {
       tem_resumo_1: !!result.resumo_1,
       tem_resumo_2: !!result.resumo_2,
