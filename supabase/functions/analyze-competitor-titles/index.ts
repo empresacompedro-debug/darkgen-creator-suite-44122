@@ -839,10 +839,53 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
     // Limpeza agressiva do JSON
     resultText = resultText.trim();
     
-    // Remove markdown code blocks
-    resultText = resultText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-    
-    // Remove texto antes do primeiro { e depois do último }
+    // Remove cercas de markdown e linguagens (```json ... ```)
+    resultText = resultText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+
+    // Normaliza aspas “curvas” e apóstrofos para evitar quebras
+    resultText = resultText
+      .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // aspas duplas curvas -> "
+      .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // apóstrofos
+      .replace(/\u00A0/g, ' ') // NBSP -> espaço normal
+      .replace(/[\u200B-\u200D\uFEFF]/g, ''); // zero-width chars
+
+    // Remove caracteres de controle exceto \n, \r, \t
+    resultText = resultText.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+
+    // Remove comentários fora de strings (// e /* */)
+    {
+      let out = '';
+      let inString = false;
+      let inLineComment = false;
+      let inBlockComment = false;
+      for (let i = 0; i < resultText.length; i++) {
+        const c = resultText[i];
+        const n = resultText[i + 1] || '';
+
+        if (inLineComment) {
+          if (c === '\n') { inLineComment = false; out += c; }
+          continue;
+        }
+        if (inBlockComment) {
+          if (c === '*' && n === '/') { inBlockComment = false; i++; }
+          continue;
+        }
+        if (c === '"' && resultText[i - 1] !== '\\') {
+          inString = !inString;
+          out += c;
+          continue;
+        }
+        if (!inString && c === '/' && (n === '/' || n === '*')) {
+          if (n === '/') inLineComment = true; else inBlockComment = true;
+          i++; // pula segundo marcador
+          continue;
+        }
+        out += c;
+      }
+      resultText = out;
+    }
+
+    // Recorta apenas o que está entre o primeiro { e o último }
     const firstBrace = resultText.indexOf('{');
     const lastBrace = resultText.lastIndexOf('}');
     
@@ -907,6 +950,12 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
         prevChar = char;
       }
       
+      // Se terminou ainda dentro de uma string, fecha a aspa para evitar truncamento
+      if (inString) {
+        result += '"';
+        inString = false;
+      }
+      
       repaired = result;
       console.log('✅ Reparo de aspas concluído');
       
@@ -940,6 +989,54 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       return repaired;
     }
     
+    // Fallback de auto-reparo via Lovable AI se o parse continuar falhando
+    async function aiRepairJSON(raw: string): Promise<string> {
+      try {
+        const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+        if (!LOVABLE_API_KEY) throw new Error('LOVABLE_API_KEY não configurada');
+
+        const payload = {
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { role: 'system', content: 'Você é um reparador ESTRITO de JSON. Responda APENAS com JSON válido. Sem markdown, sem comentários, sem texto antes/depois.' },
+            { role: 'user', content: `Repare o JSON malformado abaixo e retorne somente JSON válido.\n\n${raw}` }
+          ],
+        } as any;
+
+        const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!resp.ok) {
+          if (resp.status === 429) throw new Error('RATE_LIMIT: Limite de requisições do Lovable AI atingido');
+          if (resp.status === 402) throw new Error('NO_CREDITS: Sem créditos no Lovable AI');
+          const t = await resp.text();
+          console.error('❌ Erro no AI Gateway:', resp.status, t);
+          throw new Error('AI_GATEWAY_ERROR');
+        }
+
+        const data = await resp.json();
+        const content = data?.choices?.[0]?.message?.content ?? '';
+        let txt = String(content).trim();
+        // Limpeza básica: remover cercas de markdown e isolar entre chaves
+        txt = txt.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+        const fb = txt.indexOf('{');
+        const lb = txt.lastIndexOf('}');
+        if (fb !== -1 && lb !== -1) {
+          return txt.slice(fb, lb + 1);
+        }
+        return txt;
+      } catch (e) {
+        console.error('❌ Falha no reparo via IA:', e);
+        throw e;
+      }
+    }
+    
     let result;
     try {
       result = JSON.parse(resultText);
@@ -965,7 +1062,17 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
           console.error('📍 Contexto do erro:', context);
         }
         
-        throw new Error(`Falha ao fazer parse da resposta: ${repairError.message}. O modelo retornou um JSON malformado. Tente novamente ou use outro modelo.`);
+        // Fallback final: tentar auto-reparo via Lovable AI (uma única tentativa)
+        try {
+          console.log('🤖 Tentando reparo via Lovable AI...');
+          const aiFixed = await aiRepairJSON(resultText);
+          console.log('🤖 JSON reparado via IA (últimos 200 chars):', aiFixed.slice(-200));
+          result = JSON.parse(aiFixed);
+          console.log('✅ JSON parseado com sucesso após reparo via IA');
+        } catch (aiError: any) {
+          console.error('❌ Reparo via IA também falhou:', aiError?.message || aiError);
+          throw new Error(`Falha ao fazer parse da resposta: ${repairError.message}. Também falhou o reparo automático via IA (${aiError?.message || 'erro desconhecido'}). O modelo retornou um JSON malformado. Tente novamente, reduza o volume de dados ou selecione outro modelo.`);
+        }
       }
     }
     
