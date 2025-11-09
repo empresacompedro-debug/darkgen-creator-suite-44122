@@ -17,6 +17,7 @@ import { ScriptActions } from "@/components/script/ScriptActions";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UserManual } from "@/components/script/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 const CriadorConteudo = () => {
   const {
     toast
@@ -51,7 +52,7 @@ const CriadorConteudo = () => {
   const [ctaPositions, setCtaPositions] = useState<string[]>(["end"]);
   const [narrativeOnly, setNarrativeOnly] = useState(false);
   const [includeAffiliate, setIncludeAffiliate] = useState(false);
-  const [aiModel, setAiModel] = useState("claude-sonnet-4.5");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [script, setScript] = useState("");
   const [showManual, setShowManual] = useState(false);
   useEffect(() => {
@@ -787,23 +788,11 @@ NÃO repita nada que já foi escrito, apenas CONTINUE de forma natural.`;
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="ai-model">Modelo de IA</Label>
-            <Select value={aiModel} onValueChange={setAiModel}>
-              <SelectTrigger id="ai-model"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5 (Recomendado)</SelectItem>
-                <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
-                <SelectItem value="claude-sonnet-3.5">Claude Sonnet 3.5</SelectItem>
-                <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</SelectItem>
-                <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <AIModelSelector
+            value={aiModel}
+            onChange={setAiModel}
+            label="Modelo de IA"
+          />
 
           {/* Barra de progresso */}
           {(isStreaming || canContinue) && expectedWords > 0 && <div className="space-y-2">
