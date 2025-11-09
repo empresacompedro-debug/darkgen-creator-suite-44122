@@ -268,7 +268,7 @@ const CanaisSimilares = () => {
   const [presetIcon, setPresetIcon] = useState("🎯");
   const { savePreset } = useFilterPresets();
   const [showManual, setShowManual] = useState(false);
-  const [selectedAiModel, setSelectedAiModel] = useState<string>('claude-sonnet-4.5');
+  const [selectedAiModel, setSelectedAiModel] = useState<string>('google/gemini-2.5-flash');
 
   useEffect(() => {
     loadHistory();
@@ -629,7 +629,8 @@ const CanaisSimilares = () => {
               recentTitles: channelDetails.recentTitles || [],
               keywords: channelDetails.keywords || '',
               contentType: 'unknown'
-            }
+            },
+            aiModel: selectedAiModel
           }
         });
 
@@ -949,11 +950,14 @@ const CanaisSimilares = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="claude-sonnet-4.5">
-                  Claude 4.5 Sonnet (Recomendado) - API Key necessária
+                <SelectItem value="google/gemini-2.5-pro">
+                  🚀 Gemini 2.5 Pro - Mais potente, melhor precisão
                 </SelectItem>
-                <SelectItem value="gpt-4o">
-                  GPT-4o - API Key necessária
+                <SelectItem value="google/gemini-2.5-flash">
+                  ⚡ Gemini 2.5 Flash (Recomendado) - Rápido e preciso
+                </SelectItem>
+                <SelectItem value="google/gemini-2.5-flash-lite">
+                  💨 Gemini 2.5 Flash Lite - Mais rápido, economia
                 </SelectItem>
               </SelectContent>
             </Select>
