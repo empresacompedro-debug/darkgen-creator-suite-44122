@@ -860,6 +860,48 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
     function repairJSON(jsonStr: string): string {
       let repaired = jsonStr;
       
+      // NOVO: Escapar aspas não escapadas dentro de valores de string JSON
+      // Processa caractere por caractere para identificar aspas dentro de strings
+      console.log('🔧 Iniciando reparo de aspas não escapadas...');
+      let result = '';
+      let inString = false;
+      let prevChar = '';
+      
+      for (let i = 0; i < repaired.length; i++) {
+        const char = repaired[i];
+        const nextChar = repaired[i + 1] || '';
+        
+        if (char === '"' && prevChar !== '\\') {
+          // Se encontramos uma aspas não escapada
+          if (!inString) {
+            // Começando uma string
+            inString = true;
+            result += char;
+          } else {
+            // Verificar se é o fim da string ou uma aspas interna
+            // É fim de string se: próximo char é : ou , ou } ou ] ou whitespace
+            const isEndOfString = /[\s,:}\]]/.test(nextChar);
+            
+            if (isEndOfString) {
+              // Fim da string
+              inString = false;
+              result += char;
+            } else {
+              // Aspas interna que precisa ser escapada
+              console.log(`🔧 Escapando aspas na posição ${i}: contexto="${repaired.substring(i-10, i+10)}"`);
+              result += '\\"';
+            }
+          }
+        } else {
+          result += char;
+        }
+        
+        prevChar = char;
+      }
+      
+      repaired = result;
+      console.log('✅ Reparo de aspas concluído');
+      
       // Conta abertura e fechamento de arrays e objetos
       const openBraces = (repaired.match(/{/g) || []).length;
       const closeBraces = (repaired.match(/}/g) || []).length;
