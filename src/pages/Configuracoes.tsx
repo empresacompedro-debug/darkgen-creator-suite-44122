@@ -119,84 +119,74 @@ const Configuracoes = () => {
       return;
     }
 
+    const PLACEHOLDER = '••••••••••••••••';
+
     try {
-      // Filter only new keys that need to be saved (not the placeholder ones)
-      const newKeys = keys.filter(k => k.key.trim() && k.key !== '••••••••••••••••');
-      
-      if (newKeys.length === 0) {
-        toast({ title: "Aviso", description: "Nenhuma chave nova para salvar", variant: "default" });
-        return;
+      // Separar o que é atualização (chaves já existentes) do que é inserção (novas chaves)
+      const isUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+      const existingToUpdate = keys.filter((k) => isUUID(k.id) && k.key === PLACEHOLDER);
+      const newToInsert = keys.filter((k) => !isUUID(k.id) && k.key.trim() && k.key !== PLACEHOLDER);
+
+      console.log(`🔐 Processando ${existingToUpdate.length} atualização(ões) e ${newToInsert.length} nova(s) chave(s) para ${provider}...`);
+
+      // 1) Atualizar prioridades das chaves existentes (sem sobrescrever o valor da key)
+      for (let i = 0; i < existingToUpdate.length; i++) {
+        const k = existingToUpdate[i];
+        const { error: updateError } = await supabase
+          .from('user_api_keys')
+          .update({ priority: k.priority, updated_at: new Date().toISOString() })
+          .eq('id', k.id);
+        if (updateError) {
+          console.error('❌ Erro ao atualizar prioridade:', updateError);
+          throw new Error(`Erro ao atualizar prioridade da chave ${i + 1}: ${updateError.message}`);
+        }
       }
 
-      console.log(`🔐 Salvando ${newKeys.length} chave(s) de ${provider}...`);
-
-      // Delete existing keys
-      const { error: deleteError } = await supabase
-        .from('user_api_keys')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('api_provider', provider);
-
-      if (deleteError) {
-        console.error('❌ Erro ao deletar keys antigas:', deleteError);
-        throw new Error(`Erro ao deletar keys antigas: ${deleteError.message}`);
-      }
-
-      // Insert new keys with encryption
-      for (let i = 0; i < newKeys.length; i++) {
-        const key = newKeys[i];
-        console.log(`🔑 Criptografando chave ${i + 1}/${newKeys.length}...`);
-        
-        // Encrypt the API key using the database function
+      // 2) Inserir novas chaves (criptografadas)
+      for (let i = 0; i < newToInsert.length; i++) {
+        const k = newToInsert[i];
+        console.log(`🔑 Criptografando nova chave ${i + 1}/${newToInsert.length}...`);
         const { data: encryptedKey, error: encryptError } = await supabase
-          .rpc('encrypt_api_key', {
-            p_key: key.key.trim(),
-            p_user_id: user.id
-          });
-
+          .rpc('encrypt_api_key', { p_key: k.key.trim(), p_user_id: user.id });
         if (encryptError) {
           console.error('❌ Erro ao criptografar:', encryptError);
           throw new Error(`Erro ao criptografar chave ${i + 1}: ${encryptError.message}`);
         }
 
-        console.log(`💾 Inserindo chave ${i + 1} no banco...`);
-        
-        const { data: insertData, error: insertError } = await supabase
+        console.log(`💾 Inserindo nova chave ${i + 1} no banco...`);
+        const { error: insertError } = await supabase
           .from('user_api_keys')
           .insert({
             user_id: user.id,
             api_provider: provider,
             api_key_encrypted: encryptedKey,
             is_active: true,
-            priority: key.priority,
-            updated_at: new Date().toISOString()
-          })
-          .select();
-
+            priority: k.priority || 1,
+            updated_at: new Date().toISOString(),
+          });
         if (insertError) {
           console.error('❌ Erro ao inserir no banco:', insertError);
           throw new Error(`Erro ao inserir chave ${i + 1}: ${insertError.message}`);
         }
-
-        console.log(`✅ Chave ${i + 1} salva:`, insertData);
       }
 
-      console.log(`✅ ${newKeys.length} chave(s) de ${provider} salvas com sucesso!`);
+      // Feedback
       await loadApiKeys(user.id);
-      toast({ 
-        title: "Salvo!", 
-        description: `${newKeys.length} chave(s) de ${provider} salvas e criptografadas com sucesso` 
+      const total = existingToUpdate.length + newToInsert.length;
+      toast({
+        title: 'Salvo!',
+        description: `${total} item(ns) processado(s). ${newToInsert.length} chave(s) adicionada(s) e ${existingToUpdate.length} prioridade(s) atualizada(s).`,
       });
     } catch (error: any) {
       console.error('❌ Erro completo:', error);
-      toast({ 
-        title: "Erro ao salvar", 
-        description: error.message || "Erro desconhecido", 
-        variant: "destructive" 
+      toast({
+        title: 'Erro ao salvar',
+        description: error.message || 'Erro desconhecido',
+        variant: 'destructive',
       });
     }
   };
-
   const addKey = (provider: string) => {
     const newKey: ApiKey = {
       id: `new-${Date.now()}`,
