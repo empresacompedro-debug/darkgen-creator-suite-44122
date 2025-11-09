@@ -271,13 +271,14 @@ const SubNicheHunter = () => {
   const loadSavedAnalyses = async () => {
     setLoadingSaved(true);
     try {
-      const { data, error } = await supabase
-        .from('sub_niche_saved_analyses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setSavedAnalyses(data || []);
+      // Tabela sub_niche_saved_analyses ainda não foi criada
+      // const { data, error } = await supabase
+      //   .from('sub_niche_saved_analyses')
+      //   .select('*')
+      //   .order('created_at', { ascending: false });
+      // if (error) throw error;
+      // setSavedAnalyses(data || []);
+      setSavedAnalyses([]);
     } catch (error: any) {
       console.error('Error loading saved analyses:', error);
     } finally {
@@ -305,6 +306,13 @@ const SubNicheHunter = () => {
     }
 
     try {
+      // Tabela sub_niche_saved_analyses ainda não foi criada
+      toast({
+        title: "Em Desenvolvimento",
+        description: "Funcionalidade de salvar análises será implementada em breve",
+        variant: "default",
+      });
+      /*
       const analysisData: any = analysisResult ? {
         analysis_type: 'titles',
         analysis_name: analysisName,
@@ -340,6 +348,7 @@ const SubNicheHunter = () => {
       setShowSaveDialog(false);
       setAnalysisName("");
       loadSavedAnalyses();
+      */
     } catch (error: any) {
       console.error('Error saving analysis:', error);
       toast({
@@ -352,6 +361,13 @@ const SubNicheHunter = () => {
 
   const loadAnalysis = async (id: string) => {
     try {
+      // Tabela sub_niche_saved_analyses ainda não foi criada
+      toast({
+        title: "Em Desenvolvimento",
+        description: "Funcionalidade de carregar análises será implementada em breve",
+        variant: "default",
+      });
+      /*
       const { data, error } = await supabase
         .from('sub_niche_saved_analyses')
         .select('*')
@@ -378,6 +394,7 @@ const SubNicheHunter = () => {
         setAiModel2(data.ai_model || "claude-sonnet-4.5");
         setLanguage(data.language || "Português");
       }
+      */
 
       setShowLoadDialog(false);
       toast({
@@ -396,19 +413,13 @@ const SubNicheHunter = () => {
 
   const deleteAnalysis = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('sub_niche_saved_analyses')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-
+      // Tabela sub_niche_saved_analyses ainda não foi criada
       toast({
-        title: "✅ Análise Excluída",
-        description: "Análise excluída com sucesso!",
+        title: "Em Desenvolvimento",
+        description: "Funcionalidade de excluir análises será implementada em breve",
+        variant: "default",
       });
-
-      loadSavedAnalyses();
+      
       if (selectedAnalysisId === id) {
         setSelectedAnalysisId(null);
       }

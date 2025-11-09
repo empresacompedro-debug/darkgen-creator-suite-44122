@@ -4,13 +4,21 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Shield } from "lucide-react";
+import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Shield, Upload, CheckCheck } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { useSetupAdmin } from "@/hooks/useSetupAdmin";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface ApiKey {
   id: string;
@@ -32,6 +40,10 @@ const Configuracoes = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdminRole, setHasAdminRole] = useState(false);
   const { setupAdmin, isLoading: isSettingUpAdmin } = useSetupAdmin();
+  const [validatingKey, setValidatingKey] = useState<string | null>(null);
+  const [bulkImportText, setBulkImportText] = useState("");
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkImportProvider, setBulkImportProvider] = useState<string>("");
 
   useEffect(() => {
     loadUserData();
@@ -236,16 +248,101 @@ const Configuracoes = () => {
     }
   };
 
+  const validateKey = async (provider: string, keyId: string, keyValue: string) => {
+    if (keyValue === '••••••••••••••••') {
+      toast({ title: "Aviso", description: "Não é possível validar chaves já salvas", variant: "default" });
+      return;
+    }
+
+    setValidatingKey(keyId);
+    try {
+      const { data, error } = await supabase.functions.invoke('test-api-key', {
+        body: { provider, apiKey: keyValue }
+      });
+
+      if (error) throw error;
+
+      if (data?.valid) {
+        toast({ title: "✅ Chave válida!", description: data.message });
+      } else {
+        toast({ title: "❌ Chave inválida", description: data?.message || "Erro ao validar", variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      setValidatingKey(null);
+    }
+  };
+
+  const handleBulkImport = () => {
+    const lines = bulkImportText.trim().split('\n').filter(l => l.trim());
+    if (lines.length === 0) {
+      toast({ title: "Aviso", description: "Cole as chaves no campo de texto", variant: "default" });
+      return;
+    }
+
+    const newKeys: ApiKey[] = lines.map((line, index) => ({
+      id: `bulk-${Date.now()}-${index}`,
+      key: line.trim(),
+      is_active: true,
+      priority: index + 1,
+      is_current: false
+    }));
+
+    switch(bulkImportProvider) {
+      case 'youtube': setYoutubeKeys([...youtubeKeys, ...newKeys]); break;
+      case 'gemini': setGeminiKeys([...geminiKeys, ...newKeys]); break;
+      case 'claude': setClaudeKeys([...claudeKeys, ...newKeys]); break;
+      case 'openai': setOpenaiKeys([...openaiKeys, ...newKeys]); break;
+      case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, ...newKeys]); break;
+    }
+
+    toast({ title: "Importado!", description: `${lines.length} chave(s) importada(s)` });
+    setBulkImportText("");
+    setBulkImportOpen(false);
+  };
+
 
   const renderKeySection = (title: string, provider: string, keys: ApiKey[]) => (
     <Card className="p-6">
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <Button size="sm" onClick={() => addKey(provider)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Adicionar Key
-          </Button>
+          <div className="flex gap-2">
+            <Dialog open={bulkImportOpen && bulkImportProvider === provider} onOpenChange={(open) => {
+              setBulkImportOpen(open);
+              if (open) setBulkImportProvider(provider);
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Importar em Massa
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Importar {title} em Massa</DialogTitle>
+                  <DialogDescription>
+                    Cole uma chave por linha. A prioridade será atribuída automaticamente (primeira linha = prioridade 1).
+                  </DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  value={bulkImportText}
+                  onChange={(e) => setBulkImportText(e.target.value)}
+                  placeholder="AIzaSyC...&#10;AIzaSyD...&#10;AIzaSyE..."
+                  className="min-h-[200px] font-mono text-sm"
+                />
+                <Button onClick={handleBulkImport} className="w-full">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Importar {bulkImportText.trim().split('\n').filter(l => l.trim()).length} Chave(s)
+                </Button>
+              </DialogContent>
+            </Dialog>
+            <Button size="sm" onClick={() => addKey(provider)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar Key
+            </Button>
+          </div>
         </div>
 
         {keys.length === 0 && (
@@ -262,13 +359,30 @@ const Configuracoes = () => {
               <span className="text-xs text-muted-foreground ml-auto">Prioridade: {key.priority}</span>
             </div>
 
-            <Input
-              type="text"
-              value={key.key}
-              onChange={(e) => updateKey(provider, key.id, 'key', e.target.value)}
-              placeholder={key.key === '••••••••••••••••' ? 'Chave salva (oculta por segurança)' : 'Cole sua API Key aqui'}
-              disabled={key.key === '••••••••••••••••'}
-            />
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={key.key}
+                onChange={(e) => updateKey(provider, key.id, 'key', e.target.value)}
+                placeholder={key.key === '••••••••••••••••' ? 'Chave salva (oculta por segurança)' : 'Cole sua API Key aqui'}
+                disabled={key.key === '••••••••••••••••'}
+                className="flex-1"
+              />
+              {key.key !== '••••••••••••••••' && key.key.trim() && (
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => validateKey(provider, key.id, key.key)}
+                  disabled={validatingKey === key.id}
+                >
+                  {validatingKey === key.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CheckCheck className="h-4 w-4" />
+                  )}
+                </Button>
+              )}
+            </div>
 
             <div className="flex items-center gap-4">
               <div className="flex-1">
