@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
-import { Search, Loader2, Download, Save, FolderOpen, Trash2, Target, BookOpen, Filter } from "lucide-react";
+import { Search, Loader2, Download, Save, FolderOpen, Trash2, Target, BookOpen, Filter, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +17,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
-import { Slider } from "@/components/ui/slider";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 // Niche Finder with automatic API key rotation
@@ -60,6 +59,13 @@ const NicheFinder = () => {
   const [postFilters, setPostFilters] = useState({
     channelAgeMin: 0,
     channelAgeMax: 3650, // 10 anos
+    subscribersMin: 0,
+    subscribersMax: 5000000
+  });
+
+  const [tempFilters, setTempFilters] = useState({
+    channelAgeMin: 0,
+    channelAgeMax: 3650,
     subscribersMin: 0,
     subscribersMax: 5000000
   });
@@ -362,20 +368,32 @@ const NicheFinder = () => {
   };
 
   const applyPreset = (preset: string) => {
+    let newFilters;
     switch (preset) {
       case 'new':
-        setPostFilters({ channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000 });
+        newFilters = { channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000 };
         break;
       case 'growing':
-        setPostFilters({ channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000 });
+        newFilters = { channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000 };
         break;
       case 'established':
-        setPostFilters({ channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000 });
+        newFilters = { channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000 };
         break;
       case 'reset':
-        setPostFilters({ channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000 });
+      default:
+        newFilters = { channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000 };
         break;
     }
+    setTempFilters(newFilters);
+    setPostFilters(newFilters);
+  };
+
+  const applyFilters = () => {
+    setPostFilters(tempFilters);
+    toast({
+      title: "✅ Filtros Aplicados",
+      description: `${filteredAndSortedResults.length} vídeos encontrados`
+    });
   };
 
   const sortResults = (videos: any[]) => {
@@ -725,49 +743,77 @@ const NicheFinder = () => {
 
                       {/* Filtro de Idade do Canal */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-semibold">📅 Idade do Canal</Label>
-                          <span className="text-sm text-muted-foreground">
-                            {postFilters.channelAgeMin === 0 ? '0' : (postFilters.channelAgeMin / 365).toFixed(1)} - {(postFilters.channelAgeMax / 365).toFixed(1)} anos
-                          </span>
+                        <Label className="text-sm font-semibold">📅 Idade do Canal (em dias)</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-muted-foreground mb-1">Mínimo</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={3650}
+                              value={tempFilters.channelAgeMin}
+                              onChange={(e) => setTempFilters({ ...tempFilters, channelAgeMin: Number(e.target.value) })}
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground mb-1">Máximo</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={3650}
+                              value={tempFilters.channelAgeMax}
+                              onChange={(e) => setTempFilters({ ...tempFilters, channelAgeMax: Number(e.target.value) })}
+                              placeholder="3650"
+                            />
+                          </div>
                         </div>
-                        <Slider
-                          min={0}
-                          max={3650}
-                          step={30}
-                          value={[postFilters.channelAgeMin, postFilters.channelAgeMax]}
-                          onValueChange={([min, max]) => setPostFilters({ ...postFilters, channelAgeMin: min, channelAgeMax: max })}
-                          className="w-full"
-                        />
+                        <p className="text-xs text-muted-foreground">
+                          💡 Referência: 365 dias = 1 ano | 1095 dias = 3 anos | 1825 dias = 5 anos
+                        </p>
                       </div>
 
                       {/* Filtro de Inscritos */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-semibold">👥 Número de Inscritos</Label>
-                          <span className="text-sm text-muted-foreground">
-                            {postFilters.subscribersMin >= 1000000 
-                              ? `${(postFilters.subscribersMin / 1000000).toFixed(1)}M` 
-                              : postFilters.subscribersMin >= 1000 
-                                ? `${(postFilters.subscribersMin / 1000).toFixed(0)}K` 
-                                : postFilters.subscribersMin}
-                            {' - '}
-                            {postFilters.subscribersMax >= 1000000 
-                              ? `${(postFilters.subscribersMax / 1000000).toFixed(1)}M` 
-                              : postFilters.subscribersMax >= 1000 
-                                ? `${(postFilters.subscribersMax / 1000).toFixed(0)}K` 
-                                : postFilters.subscribersMax}
-                          </span>
+                        <Label className="text-sm font-semibold">👥 Número de Inscritos</Label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs text-muted-foreground mb-1">Mínimo</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={10000000}
+                              value={tempFilters.subscribersMin}
+                              onChange={(e) => setTempFilters({ ...tempFilters, subscribersMin: Number(e.target.value) })}
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground mb-1">Máximo</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={10000000}
+                              value={tempFilters.subscribersMax}
+                              onChange={(e) => setTempFilters({ ...tempFilters, subscribersMax: Number(e.target.value) })}
+                              placeholder="5000000"
+                            />
+                          </div>
                         </div>
-                        <Slider
-                          min={0}
-                          max={5000000}
-                          step={10000}
-                          value={[postFilters.subscribersMin, postFilters.subscribersMax]}
-                          onValueChange={([min, max]) => setPostFilters({ ...postFilters, subscribersMin: min, subscribersMax: max })}
-                          className="w-full"
-                        />
+                        <p className="text-xs text-muted-foreground">
+                          💡 Referência: 10K = 10.000 | 100K = 100.000 | 1M = 1.000.000
+                        </p>
                       </div>
+
+                      {/* Botão Aplicar Filtro */}
+                      <Button 
+                        onClick={applyFilters}
+                        className="w-full"
+                        size="lg"
+                      >
+                        <Check className="mr-2 h-5 w-5" />
+                        Aplicar Filtro
+                      </Button>
                     </div>
                   </CollapsibleContent>
                 </div>
