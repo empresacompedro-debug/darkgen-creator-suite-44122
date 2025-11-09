@@ -225,7 +225,12 @@ async function searchNiche(niche: string, userId: string, supabaseClient: any, f
   console.log(`   → ${allVideoIds.length} IDs encontrados na busca`);
   console.log(`   → ${allVideos.length} vídeos detalhados`);
   console.log(`   → ${processedVideos.length} vídeos processados`);
-  console.log(`   → ${filtered.length} após aplicar filtros`);
+  console.log(`   → ${filtered.length} após aplicar filtros (≥8min + ≥800 inscritos)`);
+  
+  // Log detalhado de filtros aplicados
+  const filteredByDuration = processedVideos.filter(v => v.durationSeconds < filters.minDuration).length;
+  const filteredBySubscribers = processedVideos.filter(v => v.subscriberCount < filters.minSubscribers).length;
+  console.log(`   📌 Filtrados: ${filteredByDuration} por duração, ${filteredBySubscribers} por inscritos`);
   console.log(`   → Retornando top ${Math.min(filtered.length, 500)}`);
 
   // Retornar top 500 vídeos após filtros
@@ -328,6 +333,11 @@ serve(async (req) => {
       videosFound: allResults.length,
       quotaUsed,
       videos: allResults,
+      debug: {
+        totalProcessed: nichesBatch.length,
+        videosPerNiche: Math.round(allResults.length / nichesBatch.length),
+        averageQuotaPerNiche: Math.round(quotaUsed / nichesBatch.length)
+      }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

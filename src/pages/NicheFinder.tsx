@@ -247,23 +247,44 @@ const NicheFinder = () => {
           body: {
             nichesBatch: batch,
             batchSearchId: batchSearch.id,
-          filters: {
-            minDuration: 480,
-            minSubscribers: 800,
-            videoDuration: 'any',
-            maxPages: maxPagesPerNiche
-          }
+            filters: {
+              minDuration: 480,
+              minSubscribers: 800,
+              videoDuration: 'any',
+              maxPages: maxPagesPerNiche
+            }
           }
         });
         
         if (error) {
           console.error('Erro no batch:', error);
+          
+          // Verificar se é erro de quota esgotada
+          if (error.message?.includes('esgotadas') || error.message?.includes('quota')) {
+            toast({
+              title: "⚠️ Quotas Esgotadas",
+              description: "Todas as chaves de API do YouTube atingiram o limite diário. Tente novamente amanhã.",
+              variant: "destructive",
+              duration: 8000
+            });
+            break; // Parar processamento
+          }
+          
           continue;
         }
         
         if (data?.videos) {
           allVideos.push(...data.videos);
           setBatchResults(prev => [...prev, ...data.videos]);
+          
+          // Mostrar aviso se nenhum vídeo foi encontrado neste batch
+          if (data.videos.length === 0 && data.debug) {
+            toast({
+              title: "ℹ️ Nenhum vídeo encontrado",
+              description: `Os filtros (≥8min + ≥800 inscritos) eliminaram todos os vídeos de "${batch.join(', ')}"`,
+              duration: 5000
+            });
+          }
         }
         
         setBatchProgress({
@@ -278,16 +299,38 @@ const NicheFinder = () => {
       }
       
       setResults(allVideos);
-      toast({
-        title: "✅ Busca concluída!",
-        description: `${allVideos.length} vídeos encontrados em ${nichesArray.length} nichos`
-      });
+      
+      // Mensagem final com estatísticas
+      if (allVideos.length === 0) {
+        toast({
+          title: "⚠️ Nenhum resultado encontrado",
+          description: `Buscados ${nichesArray.length} nichos, mas os filtros (≥8min + ≥800 inscritos) eliminaram todos os vídeos. Tente reduzir os filtros.`,
+          variant: "destructive",
+          duration: 10000
+        });
+      } else {
+        toast({
+          title: "✅ Busca concluída!",
+          description: `${allVideos.length} vídeos encontrados em ${nichesArray.length} nichos (média: ${Math.round(allVideos.length/nichesArray.length)} vídeos/nicho)`
+        });
+      }
       
     } catch (error: any) {
+      console.error('Erro na busca:', error);
+      
+      // Mensagens de erro mais específicas
+      let errorMessage = error.message || 'Erro desconhecido';
+      if (error.message?.includes('Failed to fetch')) {
+        errorMessage = 'Tempo limite excedido. Tente reduzir o número de páginas ou nichos.';
+      } else if (error.message?.includes('esgotadas') || error.message?.includes('quota')) {
+        errorMessage = 'Todas as chaves de API esgotaram. Aguarde o reset diário.';
+      }
+      
       toast({
-        title: "Erro",
-        description: error.message,
-        variant: "destructive"
+        title: "Erro na busca",
+        description: errorMessage,
+        variant: "destructive",
+        duration: 8000
       });
     } finally {
       setIsLoading(false);
@@ -422,7 +465,7 @@ const NicheFinder = () => {
                 5 páginas (~250 vídeos, 625 quota/nicho)
               </SelectItem>
               <SelectItem value="10">
-                10 páginas (~500 vídeos, 1.250 quota/nicho) - Recomendado
+                10 páginas (~500 vídeos, 1.250 quota/nicho) - Recomendado ⚡
               </SelectItem>
               <SelectItem value="20">
                 20 páginas (~1000 vídeos, 2.500 quota/nicho)
@@ -435,8 +478,11 @@ const NicheFinder = () => {
           <div className="text-xs text-muted-foreground space-y-1 p-3 bg-muted/50 rounded-md">
             <p>💡 <strong>Com 18 chaves configuradas:</strong></p>
             <p>• Total disponível: <strong>180.000 quota points/dia</strong></p>
-            <p>• Com 10 páginas: <strong>~144 nichos/dia</strong></p>
+            <p>• Com 10 páginas: <strong>~144 nichos/dia</strong> ⚡</p>
             <p>• Com 5 páginas: <strong>~288 nichos/dia</strong></p>
+            <p className="pt-2 text-yellow-600 dark:text-yellow-400">
+              ⚠️ <strong>50 páginas pode causar timeout!</strong> Use 5-10 para melhor performance.
+            </p>
           </div>
         </div>
       </Card>
