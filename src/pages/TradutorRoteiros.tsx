@@ -17,7 +17,7 @@ import { AIModelSelector } from "@/components/subniche/AIModelSelector";
 
 const TradutorRoteiros = () => {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [script, setScript] = useState("");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(["en"]);
@@ -92,7 +92,7 @@ const TradutorRoteiros = () => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
           },
           body: JSON.stringify({ script, targetLanguages: selectedLanguages, aiModel })
         }
