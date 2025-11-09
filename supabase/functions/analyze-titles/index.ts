@@ -221,7 +221,7 @@ IMPORTANTE:
           }],
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 8192,
+            maxOutputTokens: 16384,
           },
         }),
       });
@@ -260,6 +260,8 @@ IMPORTANTE:
         console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
         throw new Error('Gemini não retornou texto (possível bloqueio de segurança). Tente ajustar o prompt ou reduzir os dados.');
       }
+      
+      analysis = { markdownReport };
       
     } else if (aiModel.includes('gpt')) {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
