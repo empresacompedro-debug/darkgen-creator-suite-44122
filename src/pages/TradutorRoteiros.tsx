@@ -5,13 +5,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Languages, Loader2, Download, Trash2, Eye, BookOpen } from "lucide-react";
+import { Languages, Loader2, Download, Trash2, Eye, BookOpen, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { UserManual } from "@/components/translator/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { ImportRecentDialog } from "@/components/srt/ImportRecentDialog";
 
 const TradutorRoteiros = () => {
   const { toast } = useToast();
@@ -24,6 +25,7 @@ const TradutorRoteiros = () => {
   const [history, setHistory] = useState<any[]>([]);
   const [viewingHistory, setViewingHistory] = useState<any>(null);
   const [showManual, setShowManual] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   useEffect(() => {
     loadHistory();
@@ -146,7 +148,17 @@ const TradutorRoteiros = () => {
       <Card className="p-6 shadow-medium">
         <div className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="script">Roteiro Completo</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="script">Roteiro Completo</Label>
+              <Button
+                onClick={() => setShowImportDialog(true)}
+                variant="outline"
+                size="sm"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Importar Último Gerado
+              </Button>
+            </div>
             <Textarea
               id="script"
               placeholder="Coloque seu roteiro completo aqui..."
@@ -300,6 +312,13 @@ const TradutorRoteiros = () => {
           <UserManual />
         </DialogContent>
       </Dialog>
+
+      {/* Importar Últimos Gerados */}
+      <ImportRecentDialog
+        open={showImportDialog}
+        onOpenChange={setShowImportDialog}
+        onImport={(content) => setScript(content)}
+      />
     </div>
   );
 };
