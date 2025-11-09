@@ -1,6 +1,8 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateString, validateArray, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { getApiKey, updateApiKeyUsage } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,27 +39,29 @@ serve(async (req) => {
     const script = sanitizeString(body.script);
     const { targetLanguages, aiModel } = body;
 
-    // Detect provider keys
-    const hasAnthropic = !!Deno.env.get('ANTHROPIC_API_KEY');
-    const hasGemini = !!Deno.env.get('GEMINI_API_KEY');
-    const hasOpenAI = !!Deno.env.get('OPENAI_API_KEY');
+    // Get Supabase client for user authentication
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Choose effective model based on available API keys
-    let modelToUse: string = aiModel;
-    if (aiModel.startsWith('gpt') && !hasOpenAI) {
-      if (hasGemini) {
-        console.warn('⚠️ [translate-script] OPENAI_API_KEY ausente. Alternando automaticamente para gemini-2.5-flash');
-        modelToUse = 'gemini-2.5-flash';
-      } else if (hasAnthropic) {
-        console.warn('⚠️ [translate-script] OPENAI_API_KEY ausente. Alternando automaticamente para claude-sonnet-4-20250514');
-        modelToUse = 'claude-sonnet-4-20250514';
-      } else {
-        throw new Error('Nenhuma API key disponível para o modelo selecionado. Configure OpenAI/Gemini/Anthropic.');
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | undefined;
+    
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      if (!authError && user) {
+        userId = user.id;
       }
     }
 
-    console.log('🎯 [translate-script] Modelo selecionado:', aiModel, '| efetivo:', modelToUse);
+    console.log('🎯 [translate-script] Modelo selecionado:', aiModel);
     console.log('🌍 [translate-script] Idiomas alvo:', targetLanguages);
+    console.log('👤 [translate-script] User ID:', userId);
+
+    // Use aiModel directly - get-api-key handles provider detection
+    const modelToUse = aiModel;
 
     const languageNames: Record<string, string> = {
       pt: 'Português Brasileiro',
@@ -97,15 +101,15 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
       let requestBody: any = {};
 
       if (modelToUse.startsWith('claude')) {
-        console.log(`🔑 [translate-script] Buscando API key ANTHROPIC_API_KEY para ${targetLang}`);
-        apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+        console.log(`🔑 [translate-script] Buscando API key Anthropic para ${targetLang}`);
         
-        if (!apiKey) {
-          console.error('❌ [translate-script] ANTHROPIC_API_KEY não encontrada');
+        const keyData = await getApiKey(userId, 'claude', supabase);
+        if (!keyData) {
           throw new Error('API key não configurada para Claude');
         }
         
-        console.log('✅ [translate-script] API key encontrada:', `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`);
+        apiKey = keyData.key;
+        console.log('✅ [translate-script] API key encontrada');
         
         apiUrl = 'https://api.anthropic.com/v1/messages';
         const modelMap: Record<string, string> = {
@@ -125,7 +129,14 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
           messages: [{ role: 'user', content: prompt }]
         };
       } else if (modelToUse.startsWith('gemini')) {
-        apiKey = Deno.env.get('GEMINI_API_KEY') || '';
+        console.log(`🔑 [translate-script] Buscando API key Gemini para ${targetLang}`);
+        
+        const keyData = await getApiKey(userId, 'gemini', supabase);
+        if (!keyData) {
+          throw new Error('API key não configurada para Gemini');
+        }
+        
+        apiKey = keyData.key;
         const modelMap: Record<string, string> = {
           'gemini-2.5-pro': 'gemini-2.0-flash-exp',
           'gemini-2.5-flash': 'gemini-2.0-flash-exp',
@@ -136,7 +147,14 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
           contents: [{ parts: [{ text: prompt }] }]
         };
       } else if (modelToUse.startsWith('gpt')) {
-        apiKey = Deno.env.get('OPENAI_API_KEY') || '';
+        console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
+        
+        const keyData = await getApiKey(userId, 'openai', supabase);
+        if (!keyData) {
+          throw new Error('API key não configurada para OpenAI');
+        }
+        
+        apiKey = keyData.key;
         apiUrl = 'https://api.openai.com/v1/chat/completions';
         const isReasoningModel = modelToUse.startsWith('gpt-5') || modelToUse.startsWith('o3-') || modelToUse.startsWith('o4-');
         const maxTokens = getMaxTokensForModel(modelToUse);
