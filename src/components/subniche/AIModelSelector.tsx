@@ -40,7 +40,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Modelo avançado do Google - Requer API key",
       requiresKey: true,
       icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 100
+      maxVideos: 800
     },
     { 
       id: "gemini-2.5-flash", 
@@ -49,7 +49,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Rápido e eficiente - Requer API key",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
-      maxVideos: 150
+      maxVideos: 600
     },
     { 
       id: "gemini-2.5-flash-lite", 
@@ -58,7 +58,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Ultra rápido e leve - Requer API key",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
-      maxVideos: 60
+      maxVideos: 400
     },
     // Modelos OpenAI
     { 

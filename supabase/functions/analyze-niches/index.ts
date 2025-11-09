@@ -5,20 +5,27 @@ import { calculateNicheMetrics, type Video, type NicheAnalysis } from '../_share
 
 // Helper para determinar maxTokens baseado no modelo
 function getMaxTokensForModel(model: string): number {
-  // Claude Opus
-  if (model.includes('opus')) {
-    return 16384;
+  // Gemini Pro - contexto de 2M tokens, limitamos output para qualidade
+  if (model.includes('gemini-2.5-pro')) {
+    return 16384;  // Output tokens para resposta JSON detalhada
   }
-  // Claude Sonnet
-  if (model.includes('claude')) {
-    return 8192;
-  }
-  // Gemini (todos)
+  // Gemini Flash e Flash Lite - contexto de 1M tokens
   if (model.includes('gemini')) {
     return 8192;
   }
-  // Fallback
-  return 8192;
+  // Claude Sonnet 4.5 - contexto de 200K tokens
+  if (model.includes('claude-sonnet-4-5')) {
+    return 16384;
+  }
+  // Claude 3.7 e outros - contexto de 200K tokens
+  if (model.includes('claude')) {
+    return 8192;
+  }
+  // GPT modelos
+  if (model.includes('gpt')) {
+    return 8192;
+  }
+  return 8192; // fallback
 }
 
 const corsHeaders = {
@@ -51,10 +58,25 @@ serve(async (req) => {
     }
 
     const maxTokens = getMaxTokensForModel(aiModel);
-    console.log(`🤖 Usando ${aiModel} com ${maxTokens} max tokens para análise de ${videos.length} vídeos`);
+    
+    // Determinar limite seguro baseado no modelo (usa o que vier do youtube-search)
+    const getModelSafeLimit = (model: string): number => {
+      if (model.includes('gemini-2.5-pro')) return 800;
+      if (model.includes('gemini-2.5-flash-lite')) return 400;
+      if (model.includes('gemini-2.5-flash')) return 600;
+      if (model.includes('claude')) return 800;
+      if (model.includes('gpt')) return 600;
+      return 600;
+    };
 
-    // Prepare video data for AI analysis (300 videos for better micro-niche detection)
-    const videosForAnalysis = videos.slice(0, 300);
+    const safeLimit = getModelSafeLimit(aiModel);
+    const videosForAnalysis = videos.slice(0, Math.min(videos.length, safeLimit));
+    
+    console.log(`🤖 Usando ${aiModel} com ${maxTokens} max tokens`);
+    console.log(`📦 Vídeos recebidos: ${videos.length}`);
+    console.log(`🎯 Limite do modelo: ${safeLimit}`);
+    console.log(`✅ Analisando ${videosForAnalysis.length} vídeos`);
+    
     const videoTitles = videosForAnalysis.map((v, i) => `${i + 1}. [ID:${v.id}] ${v.title}`).join('\n');
 
     const isUltraSpecific = granularity === 'micro';

@@ -669,9 +669,23 @@ serve(async (req) => {
     // Ordenar por viral score
     filteredVideos.sort((a: any, b: any) => b.viralScore - a.viralScore);
     
-    // Separar vídeos para IA (até 300) e para o cliente (topN)
-    const analysisVideos = filteredVideos.slice(0, 300);
+    // Determinar limite de vídeos baseado no modelo de IA
+    const getModelVideoLimit = (model: string): number => {
+      if (model.includes('gemini-2.5-pro')) return 800;
+      if (model.includes('gemini-2.5-flash-lite')) return 400;
+      if (model.includes('gemini-2.5-flash')) return 600;
+      if (model.includes('claude-sonnet-4-5')) return 800;
+      if (model.includes('claude-3-7')) return 600;
+      if (model.includes('gpt-4.1')) return 600;
+      if (model.includes('gpt-4o-mini')) return 500;
+      return 600; // fallback seguro
+    };
+
+    const videoLimit = getModelVideoLimit(aiModel);
+    const analysisVideos = filteredVideos.slice(0, videoLimit);
     const clientVideos = filteredVideos.slice(0, topN);
+    
+    console.log(`📊 Enviando ${analysisVideos.length} vídeos para ${aiModel} (limite: ${videoLimit})`);
 
     console.log(`Retornando ${clientVideos.length} vídeos ao cliente, enviando ${analysisVideos.length} para IA`);
 
