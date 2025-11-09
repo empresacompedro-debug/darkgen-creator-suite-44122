@@ -445,6 +445,202 @@ const SubNicheHunter = () => {
     return lines.filter(line => /\d+/.test(line)).length;
   };
 
+  // PROCESSAMENTO POR LOTES - divide dados em múltiplos lotes
+  const splitIntoVideoBatches = (data: string, batchSize: number = 50): string[] => {
+    const lines = data.split('\n');
+    const batches: string[] = [];
+    
+    // Cada vídeo tem 4 linhas de dados
+    // Formato: Título / Visualizações / VPH / URL / [linha vazia]
+    const linesPerVideo = 5;
+    
+    for (let i = 0; i < lines.length; i += batchSize * linesPerVideo) {
+      const batchLines = lines.slice(i, i + (batchSize * linesPerVideo));
+      if (batchLines.some(l => l.trim())) {
+        batches.push(batchLines.join('\n'));
+      }
+    }
+    
+    return batches;
+  };
+
+  // Combina resultados de múltiplos lotes
+  const combineAnalysisResults = (results: any[]): AnalysisResult => {
+    if (results.length === 1) return results[0];
+    
+    // Combina palavras-chave de todos os lotes
+    const allKeywords = results.flatMap(r => 
+      r.palavras_chave_campeas?.ranking || []
+    );
+    
+    // Agrupa por keyword e soma métricas
+    const keywordMap = new Map<string, any>();
+    allKeywords.forEach(kw => {
+      if (keywordMap.has(kw.keyword)) {
+        const existing = keywordMap.get(kw.keyword);
+        existing.occurrences += kw.occurrences;
+        existing.avgViews = (existing.avgViews + kw.avgViews) / 2;
+        existing.avgVPH = (existing.avgVPH + kw.avgVPH) / 2;
+        if (kw.bestTitleViews > existing.bestTitleViews) {
+          existing.bestTitle = kw.bestTitle;
+          existing.bestTitleViews = kw.bestTitleViews;
+        }
+      } else {
+        keywordMap.set(kw.keyword, { ...kw });
+      }
+    });
+    
+    // Ordena por occurrences
+    const combinedKeywords = Array.from(keywordMap.values())
+      .sort((a, b) => b.occurrences - a.occurrences)
+      .slice(0, 30);
+    
+    // Combina micro-nichos
+    const allMicroNiches = results.flatMap(r => 
+      r.resumo_2?.micro_nichos_ranking || []
+    );
+    
+    // Agrupa micro-nichos por nome
+    const microNicheMap = new Map<string, MicroNicheRanking>();
+    allMicroNiches.forEach(mn => {
+      if (microNicheMap.has(mn.name)) {
+        const existing = microNicheMap.get(mn.name)!;
+        existing.totalViews += mn.totalViews;
+        existing.videoCount += mn.videoCount;
+        existing.avgViewsPerVideo = existing.totalViews / existing.videoCount;
+        existing.videos = [...existing.videos, ...mn.videos].slice(0, 5);
+      } else {
+        microNicheMap.set(mn.name, { ...mn });
+      }
+    });
+    
+    // Ordena por totalViews e marca campeões
+    const combinedMicroNiches = Array.from(microNicheMap.values())
+      .sort((a, b) => b.totalViews - a.totalViews)
+      .map((mn, idx) => ({
+        ...mn,
+        rank: idx + 1,
+        isChampion: idx < 3
+      }));
+    
+    // Combina sub-nichos
+    const allSubNiches = results.flatMap(r => r.sub_nichos || []);
+    const uniqueSubNiches = Array.from(
+      new Map(allSubNiches.map(sn => [sn.nome, sn])).values()
+    );
+    
+    // Combina micro-nichos que falharam
+    const allFailedMicroNiches = results.flatMap(r => 
+      r.resumo_3?.micro_nichos_que_falharam || []
+    );
+    
+    const failedMap = new Map<string, FailedMicroNiche>();
+    allFailedMicroNiches.forEach(fn => {
+      if (failedMap.has(fn.name)) {
+        const existing = failedMap.get(fn.name)!;
+        existing.totalViews += fn.totalViews;
+        existing.videoCount += fn.videoCount;
+        existing.avgViewsPerVideo = existing.totalViews / existing.videoCount;
+        existing.failedTitles = [...existing.failedTitles, ...fn.failedTitles].slice(0, 5);
+      } else {
+        failedMap.set(fn.name, { ...fn });
+      }
+    });
+    
+    const combinedFailed = Array.from(failedMap.values())
+      .sort((a, b) => a.avgViewsPerVideo - b.avgViewsPerVideo)
+      .map((fn, idx) => ({ ...fn, rank: idx + 1 }));
+    
+    // Retorna resultado combinado
+    return {
+      sub_nichos: uniqueSubNiches,
+      insights: `Análise combinada de ${results.length} lotes processados com sucesso.`,
+      palavras_chave_campeas: {
+        ranking: combinedKeywords,
+        observacao_detalhada: `Ranking combinado de ${allKeywords.length} palavras-chave de múltiplos lotes`
+      },
+      resumo_1: results[0].resumo_1,
+      resumo_2: {
+        micro_nichos_ranking: combinedMicroNiches,
+        analise_campeao: `Campeões identificados: ${combinedMicroNiches.slice(0, 3).map(m => m.name).join(', ')}`
+      },
+      resumo_3: {
+        micro_nichos_que_falharam: combinedFailed
+      }
+    };
+  };
+
+  // Processa múltiplos lotes sequencialmente
+  const processMultipleBatches = async (batches: string[]): Promise<AnalysisResult> => {
+    const allResults: any[] = [];
+    let totalVideosAnalyzed = 0;
+    
+    for (let i = 0; i < batches.length; i++) {
+      const currentBatch = i + 1;
+      const totalBatches = batches.length;
+      
+      console.log(`📦 Processando lote ${currentBatch}/${totalBatches}...`);
+      
+      toast({
+        title: `⏳ Lote ${currentBatch}/${totalBatches}`,
+        description: `Processando vídeos do lote ${currentBatch}...`,
+        duration: 3000,
+      });
+      
+      try {
+        const { data, error } = await supabase.functions.invoke(
+          'analyze-competitor-titles',
+          {
+            body: {
+              competitorData: batches[i],
+              aiModel: selectedAIModel
+            }
+          }
+        );
+        
+        if (error) throw error;
+        
+        allResults.push(data.result);
+        totalVideosAnalyzed += data.videosAnalyzed;
+        
+        toast({
+          title: `✅ Lote ${currentBatch}/${totalBatches} concluído`,
+          description: `${data.videosAnalyzed} vídeos analisados`,
+        });
+        
+      } catch (error: any) {
+        console.error(`❌ Erro no lote ${currentBatch}:`, error);
+        toast({
+          title: `⚠️ Erro no lote ${currentBatch}`,
+          description: error.message || "Continuando para o próximo lote...",
+          variant: "destructive",
+        });
+        // Continua para o próximo lote mesmo com erro
+      }
+      
+      // Aguarda 2 segundos entre lotes para evitar rate limits
+      if (i < batches.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    if (allResults.length === 0) {
+      throw new Error('Nenhum lote foi processado com sucesso');
+    }
+    
+    // Combina todos os resultados
+    const combinedResults = combineAnalysisResults(allResults);
+    setVideosDetected(totalVideosAnalyzed);
+    
+    toast({
+      title: "🎉 Análise completa!",
+      description: `${totalVideosAnalyzed} vídeos analisados em ${batches.length} lotes`,
+      duration: 5000,
+    });
+    
+    return combinedResults;
+  };
+
   // Função de limpeza de títulos
   const cleanTitles = () => {
     if (!rawTitles.trim()) {
@@ -542,37 +738,55 @@ const SubNicheHunter = () => {
       return;
     }
 
-    // Verificar se o modelo suporta a quantidade de vídeos
+    // Contar vídeos
     const videoCount = countVideosInData(competitorData);
-    const maxVideos = getModelMaxVideos(selectedAIModel);
+    const BATCH_SIZE = 50; // Processar 50 vídeos por lote
     
-    if (videoCount > maxVideos) {
-      toast({
-        title: "⚠️ Muitos vídeos para este modelo",
-        description: `${videoCount} vídeos detectados, mas "${selectedAIModel.split('/')[1]}" suporta apenas ${maxVideos}. Apenas os primeiros ${maxVideos} serão analisados. Para analisar todos, use GPT-5 Nano (1000), GPT-5 Mini (800) ou Claude Sonnet 4.5 (3000).`,
-        variant: "default",
-        duration: 8000,
-      });
-    }
-
     setLoading1(true);
     startAnalysisProgress();
     
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-competitor-titles', {
-        body: { competitorData, aiModel: selectedAIModel }
-      });
+      // Decidir se precisa dividir em lotes
+      if (videoCount <= BATCH_SIZE) {
+        // Lote único - processar normalmente
+        console.log(`📊 Processando ${videoCount} vídeos em lote único`);
+        
+        const { data, error } = await supabase.functions.invoke('analyze-competitor-titles', {
+          body: { competitorData, aiModel: selectedAIModel }
+        });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      completeAnalysisProgress();
-      setAnalysisResult(data.result);
-      setVideosDetected(data.videosAnalyzed);
-      
-      toast({
-        title: "Análise Concluída",
-        description: `${data.videosAnalyzed} vídeos analisados com sucesso`,
-      });
+        completeAnalysisProgress();
+        setAnalysisResult(data.result);
+        setVideosDetected(data.videosAnalyzed);
+        
+        toast({
+          title: "✅ Análise Concluída",
+          description: `${data.videosAnalyzed} vídeos analisados com sucesso`,
+        });
+      } else {
+        // Múltiplos lotes - processar sequencialmente
+        const batches = splitIntoVideoBatches(competitorData, BATCH_SIZE);
+        console.log(`📦 Dividindo ${videoCount} vídeos em ${batches.length} lotes de até ${BATCH_SIZE} vídeos`);
+        
+        toast({
+          title: "🔄 Processamento por Lotes",
+          description: `${videoCount} vídeos serão processados em ${batches.length} lotes`,
+          duration: 5000,
+        });
+        
+        const combinedResults = await processMultipleBatches(batches);
+        
+        completeAnalysisProgress();
+        setAnalysisResult(combinedResults);
+        
+        toast({
+          title: "🎉 Análise Completa!",
+          description: `${videoCount} vídeos analisados em ${batches.length} lotes`,
+          duration: 5000,
+        });
+      }
     } catch (error: any) {
       console.error('Error analyzing:', error);
       stopAnalysisProgress();
