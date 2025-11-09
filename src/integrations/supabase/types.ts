@@ -960,93 +960,6 @@ export type Database = {
         }
         Relationships: []
       }
-      sub_niche_analyses: {
-        Row: {
-          ai_model: string | null
-          competitor_data: string
-          created_at: string
-          id: string
-          sub_niches_found: Json
-          user_id: string
-          videos_analyzed: number | null
-        }
-        Insert: {
-          ai_model?: string | null
-          competitor_data: string
-          created_at?: string
-          id?: string
-          sub_niches_found: Json
-          user_id: string
-          videos_analyzed?: number | null
-        }
-        Update: {
-          ai_model?: string | null
-          competitor_data?: string
-          created_at?: string
-          id?: string
-          sub_niches_found?: Json
-          user_id?: string
-          videos_analyzed?: number | null
-        }
-        Relationships: []
-      }
-      sub_niche_saved_analyses: {
-        Row: {
-          ai_model: string | null
-          analysis_name: string
-          analysis_type: string
-          competitor_data: string | null
-          created_at: string
-          id: string
-          insights: string | null
-          language: string | null
-          lista_1: Json | null
-          lista_2: Json | null
-          main_niche: string | null
-          nivel_detectado: string | null
-          sub_nichos: Json | null
-          updated_at: string
-          user_id: string
-          videos_analyzed: number | null
-        }
-        Insert: {
-          ai_model?: string | null
-          analysis_name: string
-          analysis_type: string
-          competitor_data?: string | null
-          created_at?: string
-          id?: string
-          insights?: string | null
-          language?: string | null
-          lista_1?: Json | null
-          lista_2?: Json | null
-          main_niche?: string | null
-          nivel_detectado?: string | null
-          sub_nichos?: Json | null
-          updated_at?: string
-          user_id: string
-          videos_analyzed?: number | null
-        }
-        Update: {
-          ai_model?: string | null
-          analysis_name?: string
-          analysis_type?: string
-          competitor_data?: string | null
-          created_at?: string
-          id?: string
-          insights?: string | null
-          language?: string | null
-          lista_1?: Json | null
-          lista_2?: Json | null
-          main_niche?: string | null
-          nivel_detectado?: string | null
-          sub_nichos?: Json | null
-          updated_at?: string
-          user_id?: string
-          videos_analyzed?: number | null
-        }
-        Relationships: []
-      }
       subscription_plans: {
         Row: {
           created_at: string | null
@@ -1152,6 +1065,36 @@ export type Database = {
           prompt?: string
           user_id?: string
           video_title?: string
+        }
+        Relationships: []
+      }
+      title_analyses: {
+        Row: {
+          ai_model: string
+          analysis_result: Json
+          created_at: string | null
+          id: string
+          raw_data: string
+          user_id: string
+          videos_count: number
+        }
+        Insert: {
+          ai_model: string
+          analysis_result: Json
+          created_at?: string | null
+          id?: string
+          raw_data: string
+          user_id: string
+          videos_count: number
+        }
+        Update: {
+          ai_model?: string
+          analysis_result?: Json
+          created_at?: string | null
+          id?: string
+          raw_data?: string
+          user_id?: string
+          videos_count?: number
         }
         Relationships: []
       }
@@ -1452,39 +1395,6 @@ export type Database = {
           language?: string
           theme?: string
           titles?: Json
-          user_id?: string
-        }
-        Relationships: []
-      }
-      viral_titles_from_champions: {
-        Row: {
-          ai_model: string | null
-          created_at: string | null
-          generated_titles: Json
-          id: string
-          original_title: string
-          structure: string
-          theme: string
-          user_id: string
-        }
-        Insert: {
-          ai_model?: string | null
-          created_at?: string | null
-          generated_titles?: Json
-          id?: string
-          original_title: string
-          structure: string
-          theme: string
-          user_id: string
-        }
-        Update: {
-          ai_model?: string | null
-          created_at?: string | null
-          generated_titles?: Json
-          id?: string
-          original_title?: string
-          structure?: string
-          theme?: string
           user_id?: string
         }
         Relationships: []
