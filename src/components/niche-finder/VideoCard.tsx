@@ -172,6 +172,27 @@ export function VideoCard({ video }: VideoCardProps) {
             </div>
           </div>
 
+          {/* Dark Channel Badge */}
+          {video.isDarkChannel && (
+            <div className="p-3 rounded-lg border-2 bg-purple-500/10 border-purple-500/20">
+              <Badge className="bg-purple-600 text-white border-0 mb-2">
+                🎭 Canal Dark/Faceless
+              </Badge>
+              <div className="text-xs text-purple-700 dark:text-purple-300">
+                <p className="font-semibold">Confiança: {video.darkConfidence}%</p>
+                <p className="text-muted-foreground mt-1">
+                  Tipo: {video.darkType === 'narration_images' ? 'Narração + Imagens' :
+                         video.darkType === 'stock_videos' ? 'Vídeos de Arquivo' :
+                         video.darkType === 'animations' ? 'Animações' :
+                         video.darkType === 'ai_voice' ? 'Voz IA' :
+                         video.darkType === 'compilations' ? 'Compilações' :
+                         video.darkType === 'screen_recording' ? 'Gravação de Tela' :
+                         'Desconhecido'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Additional Info */}
           <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
             {video.ageInDays && (

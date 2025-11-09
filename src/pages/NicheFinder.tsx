@@ -61,7 +61,8 @@ const NicheFinder = () => {
     channelAgeMax: 3650, // 10 anos
     subscribersMin: 0,
     subscribersMax: 5000000,
-    minDurationSeconds: 0 // Novo filtro de duração
+    minDurationSeconds: 0,
+    onlyDarkChannels: false
   });
 
   const [tempFilters, setTempFilters] = useState({
@@ -69,7 +70,15 @@ const NicheFinder = () => {
     channelAgeMax: 3650,
     subscribersMin: 0,
     subscribersMax: 5000000,
-    minDurationSeconds: 0
+    minDurationSeconds: 0,
+    onlyDarkChannels: false
+  });
+
+  // Estados para análise de dark channels
+  const [darkAnalysis, setDarkAnalysis] = useState<Map<string, any>>(new Map());
+  const [darkAnalysisProgress, setDarkAnalysisProgress] = useState({
+    analyzed: 0,
+    total: 0
   });
 
   useEffect(() => {
@@ -213,6 +222,88 @@ const NicheFinder = () => {
         variant: "destructive"
       });
     }
+  };
+
+  const analyzeChannelsForDark = async (videos: any[]) => {
+    // Agrupar vídeos por canal (channelId)
+    const channelGroups = new Map<string, any[]>();
+    videos.forEach(video => {
+      if (!channelGroups.has(video.channelId)) {
+        channelGroups.set(video.channelId, []);
+      }
+      channelGroups.get(video.channelId)!.push(video);
+    });
+
+    console.log(`🎭 Analisando ${channelGroups.size} canais únicos...`);
+    
+    setDarkAnalysisProgress({ analyzed: 0, total: channelGroups.size });
+    const newDarkAnalysis = new Map(darkAnalysis);
+    let analyzed = 0;
+
+    // Analisar cada canal
+    for (const [channelId, channelVideos] of channelGroups) {
+      try {
+        // Pegar até 5 títulos de vídeos do canal
+        const recentTitles = channelVideos
+          .slice(0, 5)
+          .map(v => v.title);
+
+        const channelData = {
+          name: channelVideos[0].channelTitle,
+          description: '', // Não temos descrição no NicheFinder
+          recentTitles: recentTitles,
+          contentType: 'unknown'
+        };
+
+        console.log(`🔍 Analisando canal: ${channelData.name}`);
+
+        const { data, error } = await supabase.functions.invoke('detect-dark-channel', {
+          body: { 
+            channelData,
+            aiModel: aiModel // Usar modelo selecionado
+          }
+        });
+
+        if (error) {
+          console.error(`❌ Erro ao analisar canal ${channelId}:`, error);
+          
+          // Se for erro de créditos ou rate limit, parar análise
+          if (error.message?.includes('NO_CREDITS') || error.message?.includes('RATE_LIMIT')) {
+            toast({
+              title: "⚠️ Análise de Dark Channels Indisponível",
+              description: "Sem créditos Lovable AI ou rate limit atingido. Análise pausada.",
+              variant: "destructive"
+            });
+            break;
+          }
+          
+          continue;
+        }
+
+        // Armazenar resultado
+        newDarkAnalysis.set(channelId, data);
+        
+        analyzed++;
+        setDarkAnalysisProgress({ analyzed, total: channelGroups.size });
+
+        // Pequeno delay para não sobrecarregar
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+      } catch (error) {
+        console.error(`❌ Erro inesperado ao analisar canal ${channelId}:`, error);
+      }
+    }
+
+    setDarkAnalysis(newDarkAnalysis);
+    setDarkAnalysisProgress({ analyzed: 0, total: 0 }); // Reset progress
+    
+    const darkCount = Array.from(newDarkAnalysis.values())
+      .filter(analysis => analysis.isDarkChannel === true).length;
+
+    toast({
+      title: "✅ Análise de Dark Channels Concluída",
+      description: `${darkCount} canais dark encontrados de ${channelGroups.size} analisados`
+    });
   };
 
   const handleUnifiedSearch = async () => {
@@ -373,11 +464,22 @@ const NicheFinder = () => {
       const agePass = channelAge >= postFilters.channelAgeMin && channelAge <= postFilters.channelAgeMax;
       const subsPass = subs >= postFilters.subscribersMin && subs <= postFilters.subscribersMax;
       const durationPass = duration >= postFilters.minDurationSeconds;
-      const passes = agePass && subsPass && durationPass;
+      
+      // Filtro de Dark Channels
+      let darkPass = true;
+      if (postFilters.onlyDarkChannels) {
+        const analysis = darkAnalysis.get(video.channelId);
+        if (!analysis || analysis.isDarkChannel !== true) {
+          console.log(`❌ Filtrado (não é dark): ${video.title.substring(0, 50)}...`);
+          darkPass = false;
+        }
+      }
+      
+      const passes = agePass && subsPass && durationPass && darkPass;
       
       // Log detalhado apenas para vídeos filtrados (para não poluir console)
       if (!passes) {
-        console.log(`❌ Filtrado: ${video.title?.substring(0, 50)}... - Idade: ${channelAge}d (${agePass ? '✅' : '❌'}) - Subs: ${subs} (${subsPass ? '✅' : '❌'}) - Duração: ${duration}s (${durationPass ? '✅' : '❌'})`);
+        console.log(`❌ Filtrado: ${video.title?.substring(0, 50)}... - Idade: ${channelAge}d (${agePass ? '✅' : '❌'}) - Subs: ${subs} (${subsPass ? '✅' : '❌'}) - Duração: ${duration}s (${durationPass ? '✅' : '❌'}) - Dark: (${darkPass ? '✅' : '❌'})`);
       }
       
       return passes;
@@ -391,17 +493,17 @@ const NicheFinder = () => {
     let newFilters;
     switch (preset) {
       case 'new':
-        newFilters = { channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000, minDurationSeconds: 0 };
+        newFilters = { channelAgeMin: 0, channelAgeMax: 365, subscribersMin: 0, subscribersMax: 10000, minDurationSeconds: 0, onlyDarkChannels: false };
         break;
       case 'growing':
-        newFilters = { channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000, minDurationSeconds: 0 };
+        newFilters = { channelAgeMin: 365, channelAgeMax: 1095, subscribersMin: 10000, subscribersMax: 100000, minDurationSeconds: 0, onlyDarkChannels: false };
         break;
       case 'established':
-        newFilters = { channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000, minDurationSeconds: 0 };
+        newFilters = { channelAgeMin: 1095, channelAgeMax: 3650, subscribersMin: 100000, subscribersMax: 5000000, minDurationSeconds: 0, onlyDarkChannels: false };
         break;
       case 'reset':
       default:
-        newFilters = { channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000, minDurationSeconds: 0 };
+        newFilters = { channelAgeMin: 0, channelAgeMax: 3650, subscribersMin: 0, subscribersMax: 5000000, minDurationSeconds: 0, onlyDarkChannels: false };
         break;
     }
     setTempFilters(newFilters);
@@ -416,7 +518,8 @@ const NicheFinder = () => {
       channelAgeMax: tempFilters.channelAgeMax,
       subscribersMin: tempFilters.subscribersMin,
       subscribersMax: tempFilters.subscribersMax,
-      minDurationSeconds: tempFilters.minDurationSeconds
+      minDurationSeconds: tempFilters.minDurationSeconds,
+      onlyDarkChannels: tempFilters.onlyDarkChannels
     };
 
     // Remover duplicados por ID antes de pré-visualizar
@@ -526,6 +629,26 @@ const NicheFinder = () => {
             <Target className="h-4 w-4" />
             Lista de Nichos
           </Button>
+
+          {results.length > 0 && (
+            <Button
+              variant={darkAnalysis.size > 0 ? "default" : "outline"}
+              onClick={() => analyzeChannelsForDark(results)}
+              disabled={isLoading || darkAnalysisProgress.total > 0}
+              size="sm"
+            >
+              {darkAnalysisProgress.total > 0 ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Analisando {darkAnalysisProgress.analyzed}/{darkAnalysisProgress.total}
+                </>
+              ) : (
+                <>
+                  🎭 Analisar Dark Channels
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -936,8 +1059,44 @@ const NicheFinder = () => {
                         </p>
                       </div>
 
+                      {/* Filtro de Dark Channels */}
+                      <div className="space-y-3">
+                        <Label className="text-sm font-semibold">🎭 Canais Dark/Faceless</Label>
+                        <div className="space-y-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              id="onlyDark"
+                              checked={tempFilters.onlyDarkChannels}
+                              onChange={(e) => setTempFilters({
+                                ...tempFilters,
+                                onlyDarkChannels: e.target.checked
+                              })}
+                              disabled={darkAnalysis.size === 0}
+                              className="rounded"
+                            />
+                            <label htmlFor="onlyDark" className="text-sm font-medium">
+                              Apenas Canais Dark/Faceless
+                            </label>
+                          </div>
+                          {darkAnalysis.size === 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              ⚠️ Clique em "Analisar Dark Channels" primeiro
+                            </p>
+                          )}
+                          {darkAnalysis.size > 0 && (
+                            <p className="text-xs text-green-600 dark:text-green-400">
+                              ✅ {darkAnalysis.size} canais analisados
+                            </p>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          💡 Canais dark: apenas narração/imagens, vídeos de arquivo, animações, IA, sem pessoa aparecendo
+                        </p>
+                      </div>
+
                       {/* Botão Aplicar Filtro */}
-                      <Button 
+                      <Button
                         onClick={applyFilters}
                         className="w-full"
                         size="lg"
@@ -954,7 +1113,15 @@ const NicheFinder = () => {
             {/* Lista de vídeos */}
             <div className="space-y-4">
               {filteredAndSortedResults.map((video) => (
-                <VideoCard key={video.id} video={video} />
+                <VideoCard 
+                  key={video.id} 
+                  video={{
+                    ...video,
+                    isDarkChannel: darkAnalysis.get(video.channelId)?.isDarkChannel,
+                    darkConfidence: darkAnalysis.get(video.channelId)?.confidence,
+                    darkType: darkAnalysis.get(video.channelId)?.primaryType
+                  }} 
+                />
               ))}
             </div>
           </div>
