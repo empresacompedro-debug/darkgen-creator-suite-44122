@@ -90,11 +90,13 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
         
         apiUrl = 'https://api.anthropic.com/v1/messages';
         const modelMap: Record<string, string> = {
-          'claude-sonnet-4': 'claude-3-5-sonnet-20241022',
-          'claude-sonnet-4.5': 'claude-3-5-sonnet-20241022',
-          'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
+          'claude-sonnet-4-5': 'claude-sonnet-4-20250514',
+          'claude-sonnet-4.5': 'claude-sonnet-4-20250514',
+          'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet-20250219',
+          'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514'
         };
-        const finalModel = modelMap[aiModel] || 'claude-3-5-sonnet-20241022';
+        const finalModel = modelMap[aiModel] || 'claude-sonnet-4-20250514';
+        console.log(`🤖 [translate-script] Modelo mapeado: ${aiModel} → ${finalModel}`);
         const maxTokens = getMaxTokensForModel(finalModel);
         console.log(`📦 [translate-script] Usando ${maxTokens} max_tokens para ${finalModel} (${targetLang})`);
         
@@ -178,7 +180,9 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
-    console.error('Error in translate-script:', error.name);
+    console.error('❌ [translate-script] Erro:', error.name);
+    console.error('❌ [translate-script] Mensagem:', error.message);
+    console.error('❌ [translate-script] Stack:', error.stack);
     
     // Handle validation errors
     if (error instanceof ValidationException) {
@@ -188,9 +192,12 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
       );
     }
     
-    // Generic error for security
+    // Return detailed error for debugging
     return new Response(
-      JSON.stringify({ error: 'An error occurred while translating script' }),
+      JSON.stringify({ 
+        error: 'An error occurred while translating script',
+        details: error.message 
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
