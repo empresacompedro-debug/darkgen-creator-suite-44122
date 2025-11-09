@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
 
 const corsHeaders = {
@@ -25,6 +26,25 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
+    
+    // Get Supabase client for user API keys
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | null = null;
+    
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      if (!authError && user) {
+        userId = user.id;
+      }
+    }
+
+    console.log('👤 [generate-scene-prompts] User ID:', userId);
     
     // Validate inputs
     const errors = [
@@ -442,20 +462,136 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
         contents: [{ parts: [{ text: prompt }] }]
       };
     } else if (aiModel.startsWith('gpt')) {
-      apiKey = Deno.env.get('OPENAI_API_KEY') || '';
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
       const maxTokens = getMaxTokensForModel(aiModel);
       console.log(`📦 [generate-scene-prompts] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel}`);
       
-      requestBody = {
-        model: aiModel,
-        messages: [{ role: 'user', content: prompt }],
-        ...(isReasoningModel 
-          ? { max_completion_tokens: maxTokens }
-          : { max_tokens: maxTokens }
-        )
+      // Helper to fetch and decrypt user's OpenAI key
+      const getUserOpenAIKey = async (): Promise<{ key: string; id: string } | null> => {
+        if (!userId) return null;
+        const { data: keys, error } = await supabase
+          .from('user_api_keys')
+          .select('id, api_key_encrypted, is_active, priority, is_current')
+          .eq('user_id', userId)
+          .eq('api_provider', 'openai')
+          .eq('is_active', true)
+          .order('is_current', { ascending: false })
+          .order('priority', { ascending: true })
+          .limit(1);
+        if (error) {
+          console.error('❌ [generate-scene-prompts] Erro ao buscar chaves OpenAI do usuário:', error);
+          return null;
+        }
+        if (!keys || keys.length === 0) return null;
+        const k = keys[0];
+        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted: k.api_key_encrypted,
+          p_user_id: userId,
+        });
+        if (decErr || !decrypted) {
+          console.error('❌ [generate-scene-prompts] Erro ao descriptografar chave OpenAI:', decErr);
+          throw new Error('Falha ao descriptografar API Key do usuário');
+        }
+        return { key: decrypted as string, id: k.id };
       };
+
+      const envOpenAIKey = Deno.env.get('OPENAI_API_KEY');
+      let currentKeyInfo: { key: string; id: string } | null = null;
+      let lastErrorText: string | null = null;
+      let prompts = '';
+
+      // Retry loop with key rotation
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        if (!currentKeyInfo) {
+          try {
+            currentKeyInfo = await getUserOpenAIKey();
+          } catch (e) {
+            console.error('❌ [generate-scene-prompts] Erro ao obter chave do usuário:', e);
+          }
+        }
+
+        const openaiKeyToUse = currentKeyInfo?.key || envOpenAIKey;
+        if (!openaiKeyToUse) {
+          throw new Error('OPENAI_API_KEY não configurada');
+        }
+
+        console.log(`🔑 [generate-scene-prompts] Tentativa ${attempt} - Usando ${currentKeyInfo ? 'chave do usuário' : 'chave global'}`);
+
+        requestBody = {
+          model: aiModel,
+          messages: [{ role: 'user', content: prompt }],
+          ...(isReasoningModel 
+            ? { max_completion_tokens: maxTokens }
+            : { max_tokens: maxTokens }
+          )
+        };
+
+        console.log('🚀 [generate-scene-prompts] Enviando requisição para:', apiUrl);
+        
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKeyToUse}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        console.log('📨 [generate-scene-prompts] Status da resposta:', response.status);
+
+        if (!response.ok) {
+          const errorData = await response.text();
+          lastErrorText = errorData;
+          console.error('❌ [generate-scene-prompts] Erro da API:', errorData);
+
+          // Se for erro de quota/rate limit e estivermos usando chave do usuário, rotacionar
+          if (response.status === 429 && currentKeyInfo) {
+            try {
+              await supabase
+                .from('user_api_keys')
+                .update({
+                  is_active: false,
+                  is_current: false,
+                  quota_status: { exceeded: true, exceeded_at: new Date().toISOString() },
+                })
+                .eq('id', currentKeyInfo.id);
+              console.log('🔄 [generate-scene-prompts] Chave marcada como esgotada, tentando próxima...');
+              currentKeyInfo = null;
+              continue; // tentar novamente com próxima chave
+            } catch (rotErr) {
+              console.error('❌ [generate-scene-prompts] Erro ao rotacionar chave:', rotErr);
+            }
+          }
+
+          throw new Error(`API Error: ${response.status} - ${errorData}`);
+        }
+
+        const data = await response.json();
+        prompts = data.choices[0].message.content;
+
+        if (!prompts) {
+          console.error('❌ [generate-scene-prompts] OpenAI não retornou conteúdo:', data);
+          throw new Error('OpenAI não retornou conteúdo válido');
+        }
+
+        // Atualiza uso da chave do usuário
+        if (currentKeyInfo) {
+          await supabase
+            .from('user_api_keys')
+            .update({ last_used_at: new Date().toISOString(), is_current: true })
+            .eq('id', currentKeyInfo.id);
+        }
+
+        console.log('✅ [generate-scene-prompts] Resposta recebida com sucesso');
+        
+        return new Response(JSON.stringify({ prompts }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Se chegou aqui, todas as tentativas falharam
+      throw new Error(lastErrorText || 'Falha ao obter resposta do OpenAI após 3 tentativas');
     }
 
     if (!apiKey) {
@@ -497,8 +633,6 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
       prompts = data.content[0].text;
     } else if (aiModel.startsWith('gemini')) {
       prompts = data.candidates[0].content.parts[0].text;
-    } else if (aiModel.startsWith('gpt')) {
-      prompts = data.choices[0].message.content;
     }
 
     return new Response(JSON.stringify({ prompts }), {

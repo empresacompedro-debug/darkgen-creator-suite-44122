@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +26,24 @@ serve(async (req) => {
   try {
     const { script, scenePrompts, aiModel, srtContent, imagesPerScene = 1 } = await req.json();
 
+    // Get Supabase client for user API keys
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Get user from auth header
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | null = null;
+    
+    if (authHeader) {
+      const token = authHeader.replace('Bearer ', '');
+      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      if (!authError && user) {
+        userId = user.id;
+      }
+    }
+
+    console.log('👤 [generate-editing-guide] User ID:', userId);
     console.log('🎯 [generate-editing-guide] Modelo selecionado:', aiModel);
     console.log('📊 [generate-editing-guide] Imagens por cena:', imagesPerScene);
     console.log('📝 [generate-editing-guide] SRT fornecido:', srtContent ? 'Sim' : 'Não');
@@ -131,7 +150,7 @@ INSTRUÇÕES CRÍTICAS:
 ${imagesPerScene > 1 ? `- Cada cena tem ${imagesPerScene} imagens - divida o tempo da cena igualmente entre elas
 - O mesmo prompt visual da cena é usado para todas as ${imagesPerScene} imagens daquela cena` : ''}`;
 
-    const guide = await callAI(prompt, aiModel);
+    const guide = await callAI(prompt, aiModel, supabase, userId);
 
     // Calculate validation metrics
     const validation = {
@@ -161,7 +180,7 @@ ${imagesPerScene > 1 ? `- Cada cena tem ${imagesPerScene} imagens - divida o tem
   }
 });
 
-async function callAI(prompt: string, model: string): Promise<string> {
+async function callAI(prompt: string, model: string, supabase: any, userId: string | null): Promise<string> {
   if (model.startsWith('claude')) {
     console.log('🔑 [generate-editing-guide] Buscando API key ANTHROPIC_API_KEY');
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -230,25 +249,121 @@ async function callAI(prompt: string, model: string): Promise<string> {
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
   } else {
-    const apiKey = Deno.env.get('OPENAI_API_KEY');
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: prompt }],
-        ...(model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-')
-          ? { max_completion_tokens: getMaxTokensForModel(model) }
-          : { max_tokens: getMaxTokensForModel(model) }
-        )
-      })
-    });
+    // Helper to fetch and decrypt user's OpenAI key
+    const getUserOpenAIKey = async (): Promise<{ key: string; id: string } | null> => {
+      if (!userId) return null;
+      const { data: keys, error } = await supabase
+        .from('user_api_keys')
+        .select('id, api_key_encrypted, is_active, priority, is_current')
+        .eq('user_id', userId)
+        .eq('api_provider', 'openai')
+        .eq('is_active', true)
+        .order('is_current', { ascending: false })
+        .order('priority', { ascending: true })
+        .limit(1);
+      if (error) {
+        console.error('❌ [generate-editing-guide] Erro ao buscar chaves OpenAI do usuário:', error);
+        return null;
+      }
+      if (!keys || keys.length === 0) return null;
+      const k = keys[0];
+      const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+        p_encrypted: k.api_key_encrypted,
+        p_user_id: userId,
+      });
+      if (decErr || !decrypted) {
+        console.error('❌ [generate-editing-guide] Erro ao descriptografar chave OpenAI:', decErr);
+        throw new Error('Falha ao descriptografar API Key do usuário');
+      }
+      return { key: decrypted as string, id: k.id };
+    };
 
-    const data = await response.json();
-    return data.choices[0].message.content;
+    const envOpenAIKey = Deno.env.get('OPENAI_API_KEY');
+    let currentKeyInfo: { key: string; id: string } | null = null;
+    let lastErrorText: string | null = null;
+
+    // Retry loop with key rotation
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (!currentKeyInfo) {
+        try {
+          currentKeyInfo = await getUserOpenAIKey();
+        } catch (e) {
+          console.error('❌ [generate-editing-guide] Erro ao obter chave do usuário:', e);
+        }
+      }
+
+      const openaiKeyToUse = currentKeyInfo?.key || envOpenAIKey;
+      if (!openaiKeyToUse) {
+        throw new Error('OPENAI_API_KEY não configurada');
+      }
+
+      console.log(`🔑 [generate-editing-guide] Tentativa ${attempt} - Usando ${currentKeyInfo ? 'chave do usuário' : 'chave global'}`);
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openaiKeyToUse}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: prompt }],
+          ...(model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-')
+            ? { max_completion_tokens: getMaxTokensForModel(model) }
+            : { max_tokens: getMaxTokensForModel(model) }
+          )
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        lastErrorText = errorText;
+        console.error('❌ [generate-editing-guide] OpenAI API error:', response.status, errorText);
+
+        // Se for erro de quota/rate limit e estivermos usando chave do usuário, rotacionar
+        if (response.status === 429 && currentKeyInfo) {
+          try {
+            await supabase
+              .from('user_api_keys')
+              .update({
+                is_active: false,
+                is_current: false,
+                quota_status: { exceeded: true, exceeded_at: new Date().toISOString() },
+              })
+              .eq('id', currentKeyInfo.id);
+            console.log('🔄 [generate-editing-guide] Chave marcada como esgotada, tentando próxima...');
+            currentKeyInfo = null;
+            continue; // tentar novamente com próxima chave
+          } catch (rotErr) {
+            console.error('❌ [generate-editing-guide] Erro ao rotacionar chave:', rotErr);
+          }
+        }
+
+        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+
+      if (!content) {
+        console.error('❌ [generate-editing-guide] OpenAI não retornou conteúdo:', data);
+        throw new Error('OpenAI não retornou conteúdo válido');
+      }
+
+      // Atualiza uso da chave do usuário
+      if (currentKeyInfo) {
+        await supabase
+          .from('user_api_keys')
+          .update({ last_used_at: new Date().toISOString(), is_current: true })
+          .eq('id', currentKeyInfo.id);
+      }
+
+      console.log('✅ [generate-editing-guide] Resposta recebida com sucesso');
+      return content;
+    }
+
+    // Se chegou aqui, todas as tentativas falharam
+    throw new Error(lastErrorText || 'Falha ao obter resposta do OpenAI após 3 tentativas');
   }
 }
 
