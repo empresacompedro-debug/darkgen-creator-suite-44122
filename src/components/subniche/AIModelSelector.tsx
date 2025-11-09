@@ -87,7 +87,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Flagship 2025 - Requer API key",
       requiresKey: true,
       icon: <Sparkles className="h-3 w-3" />,
-      maxVideos: 1000
+      maxVideos: 600
     },
     { 
       id: "gpt-5-mini-2025-08-07", 
@@ -96,7 +96,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Rápido e eficiente - Requer API key",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
-      maxVideos: 1200
+      maxVideos: 800
     },
     { 
       id: "gpt-5-nano-2025-08-07", 
@@ -105,7 +105,7 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       description: "Ultra rápido - Requer API key",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
-      maxVideos: 1500
+      maxVideos: 1000
     },
     { 
       id: "gpt-4.1-2025-04-14", 

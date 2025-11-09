@@ -202,13 +202,13 @@ serve(async (req) => {
       // GPT-5: 256K contexto via API, excelente para grandes volumes
       // Sem thinking tokens overhead - cada vídeo consome apenas ~25 tokens
       if (model.startsWith('gpt-5-nano')) {
-        return 1500; // Mais rápido e eficiente
+        return 1000;  // Reduzido de 1500 - modelos de raciocínio consomem mais tokens
       }
       if (model.startsWith('gpt-5-mini')) {
-        return 1200; // Ótimo custo-benefício
+        return 800;   // Reduzido de 1200 - modelos de raciocínio consomem mais tokens
       }
       if (model.startsWith('gpt-5')) {
-        return 1000; // Modelo principal
+        return 600;   // Reduzido de 1000 - modelos de raciocínio consomem mais tokens
       }
       
       // O3 / O4: Mesma capacidade do GPT-5
@@ -747,8 +747,10 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       if (isNewModel) {
         // Modelos de raciocínio precisam de MUITO mais tokens (raciocínio + resposta)
         if (isReasoningModel) {
-          console.log('🧠 Modelo de raciocínio detectado - usando 16000 max_completion_tokens');
-          openaiBody.max_completion_tokens = 16000;
+          // Modelos de raciocínio usam reasoning_tokens DENTRO de max_completion_tokens
+          // Precisamos de: reasoning (~20k-30k) + resposta (~8k-12k) = 32k-40k total
+          console.log('🧠 Modelo de raciocínio detectado - usando 40000 max_completion_tokens');
+          openaiBody.max_completion_tokens = 40000;
         } else {
           // GPT-4.1 e outros modelos novos precisam de mais tokens para análises grandes
           console.log('📦 Usando 8000 max_completion_tokens para modelo novo (2025+)');
@@ -798,6 +800,25 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
       }
 
       resultText = data.choices[0].message.content;
+
+      // NOVO: Detectar se atingiu limite de tokens
+      if (data.choices[0].finish_reason === 'length') {
+        const usage = data.usage;
+        console.error('⚠️ ATENÇÃO: Modelo atingiu limite de tokens!');
+        console.error(`📊 Tokens usados: ${usage.total_tokens} (prompt: ${usage.prompt_tokens}, completion: ${usage.completion_tokens})`);
+        
+        if (usage.completion_tokens_details?.reasoning_tokens) {
+          console.error(`🧠 Reasoning tokens: ${usage.completion_tokens_details.reasoning_tokens}`);
+        }
+        
+        throw new Error(
+          `⚠️ O modelo ${aiModel} atingiu o limite de tokens ao processar ${videos.length} vídeos. ` +
+          `Tente uma destas soluções:\n` +
+          `1. Reduzir para ${Math.floor(videos.length / 2)} vídeos\n` +
+          `2. Usar GPT-5 Mini ou GPT-5 Nano (mais eficientes)\n` +
+          `3. Usar Claude Sonnet 4.5 (maior capacidade)`
+        );
+      }
       
       // VALIDAÇÃO: Verificar se o conteúdo não está vazio
       if (!resultText || resultText.trim().length === 0) {

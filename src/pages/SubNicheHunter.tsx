@@ -465,7 +465,7 @@ const SubNicheHunter = () => {
     if (videoCount > maxVideos) {
       toast({
         title: "⚠️ Muitos vídeos para este modelo",
-        description: `${videoCount} vídeos detectados, mas "${selectedAIModel.split('/')[1]}" suporta apenas ${maxVideos}. Apenas os primeiros ${maxVideos} serão analisados. Para analisar todos, use GPT-5 (1000), GPT-5 Mini (1200) ou GPT-5 Nano (1500).`,
+        description: `${videoCount} vídeos detectados, mas "${selectedAIModel.split('/')[1]}" suporta apenas ${maxVideos}. Apenas os primeiros ${maxVideos} serão analisados. Para analisar todos, use GPT-5 Nano (1000), GPT-5 Mini (800) ou Claude Sonnet 4.5 (3000).`,
         variant: "default",
         duration: 8000,
       });
@@ -507,11 +507,28 @@ const SubNicheHunter = () => {
         }
       }
 
-      toast({
-        title: "Erro na análise",
-        description: description || "Tente novamente",
-        variant: "destructive",
-      });
+      // Tratamento específico para erros conhecidos
+      if (description.includes('atingiu o limite de tokens')) {
+        toast({
+          title: "⚠️ Análise incompleta",
+          description: description,
+          variant: "destructive",
+          duration: 10000,
+        });
+      } else if (description.includes('Failed to fetch') || description.includes('failed to send')) {
+        toast({
+          title: "❌ Erro de conexão",
+          description: "Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.",
+          variant: "destructive",
+          duration: 5000,
+        });
+      } else {
+        toast({
+          title: "Erro na análise",
+          description: description || "Tente novamente",
+          variant: "destructive",
+        });
+      }
     } finally {
       setLoading1(false);
     }
