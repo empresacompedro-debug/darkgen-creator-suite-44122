@@ -712,8 +712,9 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
         throw new Error('❌ Muitos vídeos para processar com Kimi. Reduza a quantidade de títulos (máximo 30 vídeos) ou use outro modelo de IA (Claude, Gemini, GPT).');
       }
 
-      // Kimi usa endpoint compatível com OpenAI (tentar .ai e fallback para .cn)
-      const kimiModel = aiModel === 'kimi-k2-thinking' ? 'kimi-k2-thinking' : 'kimi-k2-turbo-preview';
+      // Kimi K2 Thinking - Endpoint oficial Moonshot (.cn)
+      // Sempre usar kimi-k2-thinking quando selecionado pelo usuário
+      const kimiModel = 'kimi-k2-thinking';
       const kimiPayload = {
         model: kimiModel,
         messages: [
@@ -723,19 +724,17 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
         max_tokens: 8192,
       };
 
-      console.log(`📤 Enviando para Kimi (modelo: ${kimiModel}, prompt size: ${prompt.length} chars)`);
+      console.log(`📤 Enviando para Kimi K2 (modelo: ${kimiModel}, prompt size: ${prompt.length} chars)`);
       
-      // Configurar timeout de 120 segundos
+      // Configurar timeout de 180 segundos (3 minutos)
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000);
-      
-      let response: Response | null = null;
-      let kimiError: string | null = null;
+      const timeoutId = setTimeout(() => controller.abort(), 180000);
       
       try {
         const startTime = Date.now();
         
-        response = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+        // Usar APENAS o endpoint oficial da Moonshot na China (.cn)
+        const response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${apiKey}`,
@@ -745,109 +744,75 @@ Retorne APENAS JSON VÁLIDO (sem markdown, sem explicações):
           signal: controller.signal
         });
 
-        const elapsed = Date.now() - startTime;
-        console.log(`⏱️ Kimi (.ai) respondeu em ${elapsed}ms com status ${response.status}`);
-
-        // Fallback para domínio .cn se necessário
-        if (!response.ok && (response.status === 404 || response.status === 401 || response.status === 403)) {
-          console.warn(`⚠️ Kimi (.ai) retornou ${response.status}. Tentando domínio .cn...`);
-          
-          const startTimeCn = Date.now();
-          response = await fetch('https://api.moonshot.cn/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(kimiPayload),
-            signal: controller.signal
-          });
-          
-          const elapsedCn = Date.now() - startTimeCn;
-          console.log(`⏱️ Kimi (.cn) respondeu em ${elapsedCn}ms com status ${response.status}`);
-        }
-      } catch (error: any) {
-        if (error.name === 'AbortError') {
-          console.error('⏱️ Timeout na API do Kimi após 120 segundos');
-          kimiError = 'timeout';
-        } else {
-          console.error('❌ Erro ao conectar com Kimi:', error.message);
-          kimiError = `conexao: ${error.message}`;
-        }
-      } finally {
         clearTimeout(timeoutId);
-      }
+        const elapsed = Date.now() - startTime;
+        console.log(`⏱️ Kimi (.cn) status: ${response.status} em ${elapsed}ms`);
 
-      // Se houve erro ou status não OK, preparar fallback
-      if (kimiError || !response || !response.ok) {
-        if (response && !response.ok && !kimiError) {
+        // Tratar erros HTTP específicos
+        if (!response.ok) {
           const errorText = await response.text();
-          console.error('❌ Erro Kimi API:', errorText);
-          kimiError = `status_${response.status}`;
+          console.error(`❌ Erro Kimi API [${response.status}]:`, errorText);
+          
+          if (response.status === 401) {
+            throw new Error('❌ API Key do Kimi inválida ou expirada. Verifique sua chave em https://platform.moonshot.cn');
+          }
+          if (response.status === 403) {
+            throw new Error('❌ Sem permissão para usar esta API Key do Kimi. Verifique as configurações da sua conta.');
+          }
+          if (response.status === 429) {
+            throw new Error('❌ Rate limit do Kimi excedido. Aguarde alguns minutos antes de tentar novamente.');
+          }
+          if (response.status >= 500) {
+            throw new Error(`❌ Serviço do Kimi temporariamente indisponível (${response.status}). Tente novamente em alguns minutos.`);
+          }
+          
+          // Erro genérico com parte do body para debug
+          const errorPreview = errorText.slice(0, 200);
+          throw new Error(`❌ Erro Kimi API (${response.status}): ${errorPreview}`);
         }
 
-        console.warn('🔁 Fallback automático: tentando Gemini 2.5 Flash devido a falha do Kimi:', kimiError);
-        // Tentar Gemini como fallback (se usuário tiver chave)
-        const gemKey = await getApiKey(userId, 'gemini', supabaseClient);
-        if (!gemKey) {
-          throw new Error('❌ A API do Kimi falhou e não há API Key do Gemini configurada para fallback. Tente outro modelo.');
-        }
-        provider = 'gemini';
-        console.log('✅ Fallback → Usando chave do usuário para Gemini');
-
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${gemKey.key}`;
-        const gemBody = {
-          contents: [
-            { parts: [{ text: prompt }] }
-          ],
-          generationConfig: { maxOutputTokens: 8192 }
-        };
-
-        const gemResp = await fetch(geminiApiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(gemBody)
-        });
-
-        if (!gemResp.ok) {
-          const t = await gemResp.text();
-          console.error('❌ Fallback Gemini falhou:', t);
-          throw new Error('❌ Kimi falhou (timeout/erro) e o fallback Gemini também falhou. Tente novamente mais tarde ou selecione outro modelo.');
-        }
-        const gemData = await gemResp.json();
-        console.log('📦 Resposta (fallback) Gemini:', JSON.stringify(gemData).slice(0, 500));
-
-        const candidates = gemData.candidates || gemData.candidate || [];
-        let fallbackText = '';
-        if (candidates[0]?.content?.parts?.[0]?.text) fallbackText = candidates[0].content.parts[0].text;
-        else if (candidates[0]?.content?.[0]?.text) fallbackText = candidates[0].content[0].text;
-        else if (candidates[0]?.content?.parts?.length) fallbackText = candidates[0].content.parts.map((p: any) => p.text || '').join('\n');
-
-        if (!fallbackText || fallbackText.trim().length === 0) {
-          console.error('❌ Resposta do Gemini (fallback) está vazia');
-          throw new Error('❌ Fallback Gemini retornou vazio. Tente novamente ou use outro modelo.');
-        }
-
-        resultText = fallbackText;
-        console.log('✅ Fallback Gemini bem-sucedido');
-      } else {
-        // Kimi respondeu OK → processar normalmente
+        // Processar resposta de sucesso
         const data = await response.json();
+        console.log('📦 Resposta Kimi recebida:', JSON.stringify(data).slice(0, 300));
+
+        // Verificar erros reportados na resposta JSON
         if (data.error) {
           console.error('❌ Erro reportado pelo Kimi:', JSON.stringify(data.error));
-          if (data.error.type === 'exceeded_current_quota_error') {
-            throw new Error('❌ Sua conta Kimi está suspensa ou sem créditos. Verifique seu plano e billing em https://platform.moonshot.ai ou use outro modelo de IA.');
+          
+          if (data.error.type === 'exceeded_current_quota_error' || data.error.code === 'insufficient_quota') {
+            throw new Error('❌ Sua conta Kimi está sem créditos. Recarregue em https://platform.moonshot.cn ou use outro modelo de IA.');
           }
-          throw new Error(`Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`);
+          
+          throw new Error(`❌ Kimi API Error: ${data.error.message || JSON.stringify(data.error)}`);
         }
 
-        resultText = data.choices[0].message.content;
+        // Extrair conteúdo da resposta
+        resultText = data.choices?.[0]?.message?.content || '';
+        
         if (!resultText || resultText.trim().length === 0) {
           console.error('❌ Resposta do Kimi está vazia');
           console.error('📦 Dados completos:', JSON.stringify(data));
-          throw new Error('A API do Kimi retornou uma resposta vazia. Tente novamente ou use outro modelo.');
+          throw new Error('❌ Kimi retornou uma resposta vazia. Tente novamente ou use outro modelo.');
         }
-        console.log('✅ Resposta do Kimi recebida:', resultText.slice(0, 200));
+        
+        console.log('✅ Resposta do Kimi K2 recebida:', resultText.slice(0, 200));
+
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        
+        if (error.name === 'AbortError') {
+          console.error('⏱️ Timeout na API do Kimi após 180 segundos');
+          throw new Error('❌ A API do Kimi demorou muito para responder (timeout após 3 minutos). Tente: 1) Reduzir a quantidade de títulos (máximo 30), 2) Usar outro modelo de IA, ou 3) Tentar novamente em alguns minutos.');
+        }
+        
+        // Se já é um erro tratado acima, re-lançar
+        if (error.message.startsWith('❌')) {
+          throw error;
+        }
+        
+        // Erro de conexão ou outro erro não tratado
+        console.error('❌ Erro ao conectar com Kimi:', error.message);
+        throw new Error(`❌ Erro ao conectar com a API do Kimi: ${error.message}. Verifique sua conexão ou tente outro modelo.`);
       }
 
     } else {
