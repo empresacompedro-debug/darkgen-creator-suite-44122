@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { getNextKeyRoundRobin, markKeyExhaustedAndGetNext } from '../_shared/round-robin.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -419,165 +420,198 @@ Technical: Medium shot, shallow depth of field keeping both characters in sharp 
 
 GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${optimizeFor.toUpperCase()} optimizations:`;
 
-    let apiUrl = '';
-    let apiKey = '';
-    let requestBody: any = {};
+    // ============================================
+    // UNIFIED RETRY + KEY ROTATION SYSTEM
+    // ============================================
+    
+    const MAX_RETRIES = 3;
+    let lastError: string | null = null;
 
-    if (aiModel.startsWith('claude')) {
-      console.log('🔑 [generate-scene-prompts] Buscando API key ANTHROPIC_API_KEY');
-      apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
-      
-      if (!apiKey) {
-        console.error('❌ [generate-scene-prompts] ANTHROPIC_API_KEY não encontrada');
-        throw new Error('API key não configurada para Claude');
-      }
-      
-      console.log('✅ [generate-scene-prompts] API key encontrada:', `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`);
-      
-      apiUrl = 'https://api.anthropic.com/v1/messages';
-      const modelMap: Record<string, string> = {
-        'claude-sonnet-4.5': 'claude-sonnet-4-5',
-        'claude-sonnet-4': 'claude-sonnet-4-0',
-        'claude-sonnet-3.7': 'claude-3-7-sonnet-20250219',
-        'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
-      };
-      const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
-      const maxTokens = getMaxTokensForModel(finalModel);
-      console.log(`📦 [generate-scene-prompts] Usando ${maxTokens} max_tokens para ${finalModel}`);
-      
-      requestBody = {
-        model: finalModel,
-        max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }],
-        stream: true
-      };
-    } else if (aiModel.startsWith('gemini')) {
-      apiKey = Deno.env.get('GEMINI_API_KEY') || '';
-      const modelMap: Record<string, string> = {
-        'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-      };
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:streamGenerateContent?alt=sse&key=${apiKey}`;
-      requestBody = {
-        contents: [{ parts: [{ text: prompt }] }]
-      };
-    } else if (aiModel.startsWith('gpt')) {
-      apiUrl = 'https://api.openai.com/v1/chat/completions';
-      const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
-      const maxTokens = getMaxTokensForModel(aiModel);
-      console.log(`📦 [generate-scene-prompts] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel}`);
-      
-      // Helper to fetch and decrypt user's OpenAI key
-      const getUserOpenAIKey = async (): Promise<{ key: string; id: string } | null> => {
-        if (!userId) return null;
-        const { data: keys, error } = await supabase
-          .from('user_api_keys')
-          .select('id, api_key_encrypted, is_active, priority, is_current')
-          .eq('user_id', userId)
-          .eq('api_provider', 'openai')
-          .eq('is_active', true)
-          .order('is_current', { ascending: false })
-          .order('priority', { ascending: true })
-          .limit(1);
-        if (error) {
-          console.error('❌ [generate-scene-prompts] Erro ao buscar chaves OpenAI do usuário:', error);
-          return null;
-        }
-        if (!keys || keys.length === 0) return null;
-        const k = keys[0];
-        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
-          p_encrypted: k.api_key_encrypted,
-          p_user_id: userId,
-        });
-        if (decErr || !decrypted) {
-          console.error('❌ [generate-scene-prompts] Erro ao descriptografar chave OpenAI:', decErr);
-          throw new Error('Falha ao descriptografar API Key do usuário');
-        }
-        return { key: decrypted as string, id: k.id };
-      };
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`🔄 [generate-scene-prompts] Tentativa ${attempt}/${MAX_RETRIES}`);
 
-      const envOpenAIKey = Deno.env.get('OPENAI_API_KEY');
-      let currentKeyInfo: { key: string; id: string } | null = null;
-      let lastErrorText: string | null = null;
-      let prompts = '';
+        let apiUrl = '';
+        let apiKey = '';
+        let keyId = 'global';
+        let requestBody: any = {};
+        let headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-      // Retry loop with key rotation
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        if (!currentKeyInfo) {
-          try {
-            currentKeyInfo = await getUserOpenAIKey();
-          } catch (e) {
-            console.error('❌ [generate-scene-prompts] Erro ao obter chave do usuário:', e);
+        // ============================================
+        // CONFIGURAÇÃO POR MODELO COM ROUND-ROBIN
+        // ============================================
+        
+        if (aiModel.startsWith('claude')) {
+          // Tentar chave do usuário primeiro, depois global
+          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'claude', supabase);
+          
+          if (keyInfo) {
+            apiKey = keyInfo.key;
+            keyId = keyInfo.keyId;
+            console.log(`🔑 [generate-scene-prompts] Usando chave Claude do usuário (${keyInfo.keyNumber}/${keyInfo.totalKeys})`);
+          } else {
+            apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+            console.log('🔑 [generate-scene-prompts] Usando chave Claude global');
           }
+          
+          if (!apiKey) throw new Error('API key não configurada para Claude');
+          
+          apiUrl = 'https://api.anthropic.com/v1/messages';
+          const modelMap: Record<string, string> = {
+            'claude-sonnet-4.5': 'claude-sonnet-4-5',
+            'claude-sonnet-4': 'claude-sonnet-4-0',
+            'claude-sonnet-3.7': 'claude-3-7-sonnet-20250219',
+            'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
+          };
+          const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
+          const maxTokens = getMaxTokensForModel(finalModel);
+          
+          requestBody = {
+            model: finalModel,
+            max_tokens: maxTokens,
+            messages: [{ role: 'user', content: prompt }],
+            stream: true
+          };
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+          
+        } else if (aiModel.startsWith('gemini')) {
+          // Tentar chave do usuário primeiro, depois global
+          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'gemini', supabase);
+          
+          if (keyInfo) {
+            apiKey = keyInfo.key;
+            keyId = keyInfo.keyId;
+            console.log(`🔑 [generate-scene-prompts] Usando chave Gemini do usuário (${keyInfo.keyNumber}/${keyInfo.totalKeys})`);
+          } else {
+            apiKey = Deno.env.get('GEMINI_API_KEY') || '';
+            console.log('🔑 [generate-scene-prompts] Usando chave Gemini global');
+          }
+          
+          if (!apiKey) throw new Error('API key não configurada para Gemini');
+          
+          const modelMap: Record<string, string> = {
+            'gemini-2.5-pro': 'gemini-2.0-flash-exp',
+            'gemini-2.5-flash': 'gemini-2.0-flash-exp',
+            'gemini-2.5-flash-lite': 'gemini-1.5-flash'
+          };
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:streamGenerateContent?alt=sse&key=${apiKey}`;
+          requestBody = {
+            contents: [{ parts: [{ text: prompt }] }]
+          };
+          
+        } else if (aiModel.startsWith('gpt')) {
+          // Tentar chave do usuário primeiro, depois global
+          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'openai', supabase);
+          
+          if (keyInfo) {
+            apiKey = keyInfo.key;
+            keyId = keyInfo.keyId;
+            console.log(`🔑 [generate-scene-prompts] Usando chave OpenAI do usuário (${keyInfo.keyNumber}/${keyInfo.totalKeys})`);
+          } else {
+            apiKey = Deno.env.get('OPENAI_API_KEY') || '';
+            console.log('🔑 [generate-scene-prompts] Usando chave OpenAI global');
+          }
+          
+          if (!apiKey) throw new Error('API key não configurada para GPT');
+          
+          apiUrl = 'https://api.openai.com/v1/chat/completions';
+          const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
+          const maxTokens = getMaxTokensForModel(aiModel);
+          
+          requestBody = {
+            model: aiModel,
+            messages: [{ role: 'user', content: prompt }],
+            stream: true,
+            ...(isReasoningModel 
+              ? { max_completion_tokens: maxTokens }
+              : { max_tokens: maxTokens }
+            )
+          };
+          headers['Authorization'] = `Bearer ${apiKey}`;
+          
+        } else {
+          throw new Error(`Modelo desconhecido: ${aiModel}`);
         }
 
-        const openaiKeyToUse = currentKeyInfo?.key || envOpenAIKey;
-        if (!openaiKeyToUse) {
-          throw new Error('OPENAI_API_KEY não configurada');
-        }
-
-        console.log(`🔑 [generate-scene-prompts] Tentativa ${attempt} - Usando ${currentKeyInfo ? 'chave do usuário' : 'chave global'}`);
-
-        requestBody = {
-          model: aiModel,
-          messages: [{ role: 'user', content: prompt }],
-          stream: true,
-          ...(isReasoningModel 
-            ? { max_completion_tokens: maxTokens }
-            : { max_tokens: maxTokens }
-          )
-        };
-
-        console.log('🚀 [generate-scene-prompts] Enviando requisição streaming para:', apiUrl);
+        // ============================================
+        // FAZER REQUISIÇÃO
+        // ============================================
+        
+        console.log('🚀 [generate-scene-prompts] Enviando requisição para:', apiUrl.replace(apiKey, '***'));
         
         const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiKeyToUse}`
-          },
+          headers,
           body: JSON.stringify(requestBody)
         });
 
-        console.log('📨 [generate-scene-prompts] Status da resposta:', response.status);
+        console.log('📨 [generate-scene-prompts] Status:', response.status);
 
+        // ============================================
+        // TRATAMENTO DE ERROS COM ROTAÇÃO
+        // ============================================
+        
         if (!response.ok) {
           const errorData = await response.text();
-          lastErrorText = errorData;
+          lastError = errorData;
           console.error('❌ [generate-scene-prompts] Erro da API:', errorData);
 
-          // Se for erro de quota/rate limit e estivermos usando chave do usuário, rotacionar
-          if (response.status === 429 && currentKeyInfo) {
-            try {
-              await supabase
-                .from('user_api_keys')
-                .update({
-                  is_active: false,
-                  is_current: false,
-                  quota_status: { exceeded: true, exceeded_at: new Date().toISOString() },
-                })
-                .eq('id', currentKeyInfo.id);
-              console.log('🔄 [generate-scene-prompts] Chave marcada como esgotada, tentando próxima...');
-              currentKeyInfo = null;
-              continue; // tentar novamente com próxima chave
-            } catch (rotErr) {
-              console.error('❌ [generate-scene-prompts] Erro ao rotacionar chave:', rotErr);
+          // QUOTA EXCEEDED - Tentar rotacionar chave
+          if (response.status === 429 && keyId !== 'global') {
+            console.log('⚠️ [generate-scene-prompts] Quota excedida, tentando rotacionar chave...');
+            
+            const provider = aiModel.startsWith('claude') ? 'claude' : 
+                           aiModel.startsWith('gemini') ? 'gemini' : 'openai';
+            
+            const nextKey = await markKeyExhaustedAndGetNext(userId || undefined, keyId, provider, supabase);
+            
+            if (nextKey) {
+              console.log(`✅ [generate-scene-prompts] Nova chave disponível (${nextKey.keyNumber}/${nextKey.totalKeys})`);
+              continue; // Retry com nova chave
+            } else {
+              console.log('❌ [generate-scene-prompts] Nenhuma chave alternativa disponível');
             }
           }
 
-          throw new Error(`API Error: ${response.status} - ${errorData}`);
+          // Mensagem de erro amigável
+          let errorMessage = 'Erro ao gerar prompts';
+          try {
+            const errorJson = JSON.parse(errorData);
+            if (response.status === 429) {
+              if (aiModel.startsWith('gemini')) {
+                errorMessage = 'Quota do Gemini excedida. Tente outro modelo de IA ou aguarde alguns minutos.';
+              } else if (aiModel.startsWith('claude')) {
+                errorMessage = 'Quota do Claude excedida. Tente outro modelo de IA.';
+              } else {
+                errorMessage = 'Quota da API excedida. Tente outro modelo de IA.';
+              }
+            } else {
+              errorMessage = errorJson.error?.message || errorMessage;
+            }
+          } catch (e) {
+            // Keep default message
+          }
+
+          // Se foi o último attempt, retornar erro
+          if (attempt === MAX_RETRIES) {
+            return new Response(
+              JSON.stringify({ error: errorMessage, details: errorData }),
+              { 
+                status: response.status,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+              }
+            );
+          }
+          
+          continue; // Retry
         }
 
-        // Retornar stream diretamente
-        if (currentKeyInfo) {
-          await supabase
-            .from('user_api_keys')
-            .update({ last_used_at: new Date().toISOString(), is_current: true })
-            .eq('id', currentKeyInfo.id);
-        }
-
-        console.log('✅ [generate-scene-prompts] Streaming iniciado com sucesso');
+        // ============================================
+        // STREAMING UNIFICADO COM HEARTBEAT
+        // ============================================
+        
+        console.log('✅ [generate-scene-prompts] Streaming iniciado');
         
         const stream = new ReadableStream({
           async start(controller) {
@@ -589,32 +623,66 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
               return;
             }
 
+            let lastHeartbeat = Date.now();
+            const HEARTBEAT_INTERVAL = 10000; // 10s
+
+            // Heartbeat timer
+            const heartbeatTimer = setInterval(() => {
+              const now = Date.now();
+              if (now - lastHeartbeat > HEARTBEAT_INTERVAL) {
+                controller.enqueue(`data: ${JSON.stringify({ heartbeat: true })}\n\n`);
+                lastHeartbeat = now;
+              }
+            }, HEARTBEAT_INTERVAL);
+
             try {
+              let buffer = '';
+              
               while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const chunk = decoder.decode(value);
-                const lines = chunk.split('\n');
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
                 
                 for (const line of lines) {
+                  if (!line.trim()) continue;
+                  
                   if (line.startsWith('data: ')) {
                     const data = line.slice(6);
                     if (data === '[DONE]') continue;
                     
                     try {
                       const parsed = JSON.parse(data);
-                      const content = parsed.choices?.[0]?.delta?.content;
+                      let content = '';
+                      
+                      // Extração unificada de conteúdo
+                      if (aiModel.startsWith('claude')) {
+                        if (parsed.type === 'content_block_delta') {
+                          content = parsed.delta?.text || '';
+                        }
+                      } else if (aiModel.startsWith('gemini')) {
+                        content = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+                      } else if (aiModel.startsWith('gpt')) {
+                        content = parsed.choices?.[0]?.delta?.content || '';
+                      }
+                      
                       if (content) {
                         controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
+                        lastHeartbeat = Date.now();
                       }
                     } catch (e) {
-                      // Ignorar erros de parse
+                      // Ignorar erros de parse parcial
                     }
                   }
                 }
               }
+            } catch (streamError) {
+              console.error('❌ [generate-scene-prompts] Erro no streaming:', streamError);
+              controller.enqueue(`data: ${JSON.stringify({ error: 'Erro no streaming' })}\n\n`);
             } finally {
+              clearInterval(heartbeatTimer);
               controller.close();
             }
           }
@@ -628,146 +696,37 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
             'Connection': 'keep-alive',
           },
         });
-      }
 
-      // Se chegou aqui, todas as tentativas falharam
-      throw new Error(lastErrorText || 'Falha ao obter resposta do OpenAI após 3 tentativas');
-    }
-
-    if (!apiKey) {
-      throw new Error(`API key não configurada para ${aiModel}`);
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
-
-    if (aiModel.startsWith('claude')) {
-      headers['x-api-key'] = apiKey;
-      headers['anthropic-version'] = '2023-06-01';
-    } else if (aiModel.startsWith('gpt')) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
-
-    console.log('🚀 [generate-scene-prompts] Enviando requisição streaming para:', apiUrl);
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody)
-    });
-
-    console.log('📨 [generate-scene-prompts] Status da resposta:', response.status);
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('❌ [generate-scene-prompts] Erro da API:', errorData);
-      console.error('❌ [generate-scene-prompts] Status:', response.status);
-      
-      // Parse error message for better user feedback
-      let errorMessage = 'Erro ao gerar prompts';
-      try {
-        const errorJson = JSON.parse(errorData);
-        if (response.status === 429) {
-          if (aiModel.startsWith('gemini')) {
-            errorMessage = 'Quota do Gemini excedida. Tente outro modelo de IA ou aguarde alguns minutos.';
-          } else if (aiModel.startsWith('claude')) {
-            errorMessage = 'Quota do Claude excedida. Tente outro modelo de IA.';
-          } else {
-            errorMessage = 'Quota da API excedida. Tente outro modelo de IA.';
-          }
-        } else {
-          errorMessage = errorJson.error?.message || errorMessage;
-        }
-      } catch (e) {
-        // Keep default message
-      }
-      
-      return new Response(
-        JSON.stringify({ error: errorMessage, details: errorData }),
-        { 
-          status: response.status,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
-    }
-
-    // Stream para Claude e Gemini
-    const stream = new ReadableStream({
-      async start(controller) {
-        const reader = response.body?.getReader();
-        const decoder = new TextDecoder();
+      } catch (attemptError: any) {
+        console.error(`❌ [generate-scene-prompts] Tentativa ${attempt} falhou:`, attemptError);
+        lastError = attemptError.message;
         
-        if (!reader) {
-          controller.close();
-          return;
-        }
-
-        try {
-          let buffer = '';
-          
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              
-              if (aiModel.startsWith('claude')) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6);
-                  if (data === '[DONE]') continue;
-                  
-                  try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.type === 'content_block_delta') {
-                      const content = parsed.delta?.text;
-                      if (content) {
-                        controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
-                      }
-                    }
-                  } catch (e) {
-                    // Ignorar erros de parse
-                  }
-                }
-              } else if (aiModel.startsWith('gemini')) {
-                if (line.startsWith('data: ')) {
-                  const data = line.slice(6);
-                  
-                  try {
-                    const parsed = JSON.parse(data);
-                    const content = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (content) {
-                      controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
-                    }
-                  } catch (e) {
-                    // Ignorar erros de parse
-                  }
-                }
-              }
+        if (attempt === MAX_RETRIES) {
+          return new Response(
+            JSON.stringify({ 
+              error: 'Falha após múltiplas tentativas', 
+              details: lastError 
+            }),
+            { 
+              status: 500,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' }
             }
-          }
-        } catch (streamError) {
-          console.error('❌ [generate-scene-prompts] Erro no streaming:', streamError);
-          controller.enqueue(`data: ${JSON.stringify({ error: 'Erro no streaming' })}\n\n`);
-        } finally {
-          controller.close();
+          );
         }
+        
+        // Aguardar antes de retry (backoff exponencial)
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
       }
-    });
+    }
 
-    return new Response(stream, {
-      headers: {
-        ...corsHeaders,
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-      },
-    });
+    // Nunca deve chegar aqui, mas por segurança
+    return new Response(
+      JSON.stringify({ error: 'Erro desconhecido após tentativas' }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
   } catch (error: any) {
     if (error instanceof ValidationException) {
       return new Response(JSON.stringify({ error: 'Validation failed', details: error.errors }), {

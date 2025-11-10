@@ -52,6 +52,34 @@ const PromptsParaCenas = () => {
     }
   };
 
+  // ============================================
+  // AUTO-REFRESH DE SESSÃO
+  // ============================================
+  const ensureValidSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      throw new Error("Você precisa estar logado para gerar prompts");
+    }
+    
+    // Verificar se a sessão está próxima de expirar (< 5 minutos)
+    const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+    const now = Date.now();
+    
+    if (expiresAt - now < 5 * 60 * 1000) { // < 5 minutos
+      console.log('🔄 Sessão próxima de expirar, renovando...');
+      const { data: { session: newSession }, error } = await supabase.auth.refreshSession();
+      
+      if (error || !newSession) {
+        throw new Error("Sua sessão expirou. Por favor, faça login novamente.");
+      }
+      
+      return newSession;
+    }
+    
+    return session;
+  };
+
   const handleGeneratePrompts = async () => {
     if (!script.trim()) {
       toast({
@@ -78,13 +106,12 @@ const PromptsParaCenas = () => {
     setIsLoading(true);
     setGeneratedPrompts(""); // Limpar prompts anteriores
     
+    // AbortController para cancelamento
+    const abortController = new AbortController();
+    
     try {
-      // Obter token de autenticação do usuário
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        throw new Error("Você precisa estar logado para gerar prompts");
-      }
+      // Garantir sessão válida
+      const session = await ensureValidSession();
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts`,
@@ -104,6 +131,7 @@ const PromptsParaCenas = () => {
             includeText, 
             aiModel
           }),
+          signal: abortController.signal,
         }
       );
 
@@ -120,31 +148,53 @@ const PromptsParaCenas = () => {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = "";
+      let lastChunkTime = Date.now();
+      const STREAM_TIMEOUT = 30000; // 30s sem dados = timeout
+
+      // Timeout monitor
+      const timeoutChecker = setInterval(() => {
+        const timeSinceLastChunk = Date.now() - lastChunkTime;
+        if (timeSinceLastChunk > STREAM_TIMEOUT) {
+          console.error('⏱️ Stream timeout - sem dados por 30s');
+          abortController.abort();
+          clearInterval(timeoutChecker);
+        }
+      }, 5000);
 
       if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n');
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.content) {
-                  accumulatedText += data.content;
-                  setGeneratedPrompts(accumulatedText);
-                } else if (data.error) {
-                  throw new Error(data.error);
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  
+                  if (data.content) {
+                    accumulatedText += data.content;
+                    setGeneratedPrompts(accumulatedText);
+                    lastChunkTime = Date.now(); // Atualizar timestamp
+                  } else if (data.error) {
+                    throw new Error(data.error);
+                  } else if (data.heartbeat) {
+                    // Heartbeat do servidor - stream ainda ativo
+                    lastChunkTime = Date.now();
+                    console.log('💓 Heartbeat recebido');
+                  }
+                } catch (e: any) {
+                  if (e.message && !e.message.includes('JSON')) throw e;
+                  // Ignorar erros de parse parcial silenciosos
                 }
-              } catch (e: any) {
-                if (e.message) throw e;
-                // Ignorar erros de parse silenciosos
               }
             }
           }
+        } finally {
+          clearInterval(timeoutChecker);
         }
       }
 
@@ -168,9 +218,19 @@ const PromptsParaCenas = () => {
       }
     } catch (error: any) {
       console.error("Erro ao gerar prompts:", error);
+      
+      let errorMessage = error.message || "Erro desconhecido ao gerar prompts.";
+      
+      // Mensagens específicas
+      if (error.name === 'AbortError') {
+        errorMessage = "Streaming interrompido (timeout de 30s sem resposta). Tente novamente.";
+      } else if (errorMessage.includes('sessão expirou')) {
+        errorMessage = "Sua sessão expirou. Por favor, recarregue a página e faça login novamente.";
+      }
+      
       toast({
         title: "Erro ao Gerar Prompts",
-        description: error.message || "Erro desconhecido ao gerar prompts. Tente outro modelo de IA.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -524,8 +584,24 @@ const PromptsParaCenas = () => {
           />
 
           <Button onClick={handleGeneratePrompts} disabled={isLoading} className="w-full">
-            {isLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Gerando Prompts...</> : <><FileText className="h-4 w-4 mr-2" />Gerar Prompts de Cena</>}
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <span className="animate-pulse">IA está escrevendo...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Gerar Prompts de Cena
+              </>
+            )}
           </Button>
+          
+          {isLoading && (
+            <div className="text-sm text-muted-foreground text-center animate-pulse">
+              💭 Analisando roteiro e criando prompts detalhados...
+            </div>
+          )}
         </div>
       </Card>
 
