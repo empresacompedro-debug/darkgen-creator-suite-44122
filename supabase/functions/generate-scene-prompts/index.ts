@@ -448,7 +448,8 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
       requestBody = {
         model: finalModel,
         max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }]
+        messages: [{ role: 'user', content: prompt }],
+        stream: true
       };
     } else if (aiModel.startsWith('gemini')) {
       apiKey = Deno.env.get('GEMINI_API_KEY') || '';
@@ -457,7 +458,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
         'gemini-2.5-flash': 'gemini-2.0-flash-exp',
         'gemini-2.5-flash-lite': 'gemini-1.5-flash'
       };
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`;
+      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:streamGenerateContent?alt=sse&key=${apiKey}`;
       requestBody = {
         contents: [{ parts: [{ text: prompt }] }]
       };
@@ -521,13 +522,14 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
         requestBody = {
           model: aiModel,
           messages: [{ role: 'user', content: prompt }],
+          stream: true,
           ...(isReasoningModel 
             ? { max_completion_tokens: maxTokens }
             : { max_tokens: maxTokens }
           )
         };
 
-        console.log('🚀 [generate-scene-prompts] Enviando requisição para:', apiUrl);
+        console.log('🚀 [generate-scene-prompts] Enviando requisição streaming para:', apiUrl);
         
         const response = await fetch(apiUrl, {
           method: 'POST',
@@ -567,15 +569,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           throw new Error(`API Error: ${response.status} - ${errorData}`);
         }
 
-        const data = await response.json();
-        prompts = data.choices[0].message.content;
-
-        if (!prompts) {
-          console.error('❌ [generate-scene-prompts] OpenAI não retornou conteúdo:', data);
-          throw new Error('OpenAI não retornou conteúdo válido');
-        }
-
-        // Atualiza uso da chave do usuário
+        // Retornar stream diretamente
         if (currentKeyInfo) {
           await supabase
             .from('user_api_keys')
@@ -583,10 +577,56 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
             .eq('id', currentKeyInfo.id);
         }
 
-        console.log('✅ [generate-scene-prompts] Resposta recebida com sucesso');
+        console.log('✅ [generate-scene-prompts] Streaming iniciado com sucesso');
         
-        return new Response(JSON.stringify({ prompts }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        const stream = new ReadableStream({
+          async start(controller) {
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            
+            if (!reader) {
+              controller.close();
+              return;
+            }
+
+            try {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+                    
+                    try {
+                      const parsed = JSON.parse(data);
+                      const content = parsed.choices?.[0]?.delta?.content;
+                      if (content) {
+                        controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
+                      }
+                    } catch (e) {
+                      // Ignorar erros de parse
+                    }
+                  }
+                }
+              }
+            } finally {
+              controller.close();
+            }
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
         });
       }
 
@@ -609,7 +649,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    console.log('🚀 [generate-scene-prompts] Enviando requisição para:', apiUrl);
+    console.log('🚀 [generate-scene-prompts] Enviando requisição streaming para:', apiUrl);
     
     const response = await fetch(apiUrl, {
       method: 'POST',
@@ -626,17 +666,78 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
       throw new Error(`API Error: ${response.status} - ${errorData}`);
     }
 
-    const data = await response.json();
-    let prompts = '';
+    // Stream para Claude e Gemini
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        
+        if (!reader) {
+          controller.close();
+          return;
+        }
 
-    if (aiModel.startsWith('claude')) {
-      prompts = data.content[0].text;
-    } else if (aiModel.startsWith('gemini')) {
-      prompts = data.candidates[0].content.parts[0].text;
-    }
+        try {
+          let buffer = '';
+          
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              
+              if (aiModel.startsWith('claude')) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  if (data === '[DONE]') continue;
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.type === 'content_block_delta') {
+                      const content = parsed.delta?.text;
+                      if (content) {
+                        controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
+                      }
+                    }
+                  } catch (e) {
+                    // Ignorar erros de parse
+                  }
+                }
+              } else if (aiModel.startsWith('gemini')) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6);
+                  
+                  try {
+                    const parsed = JSON.parse(data);
+                    const content = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (content) {
+                      controller.enqueue(`data: ${JSON.stringify({ content })}\n\n`);
+                    }
+                  } catch (e) {
+                    // Ignorar erros de parse
+                  }
+                }
+              }
+            }
+          }
+        } finally {
+          controller.close();
+        }
+      }
+    });
 
-    return new Response(JSON.stringify({ prompts }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (error: any) {
     if (error instanceof ValidationException) {

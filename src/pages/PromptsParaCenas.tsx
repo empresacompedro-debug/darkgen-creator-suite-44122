@@ -76,39 +76,78 @@ const PromptsParaCenas = () => {
     }
 
     setIsLoading(true);
+    setGeneratedPrompts(""); // Limpar prompts anteriores
+    
     try {
-      const { data, error } = await supabase.functions.invoke('generate-scene-prompts', {
-        body: { 
-          script, 
-          generationMode, 
-          sceneStyle, 
-          characters, 
-          optimizeFor, 
-          language, 
-          includeText, 
-          aiModel
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({ 
+            script, 
+            generationMode, 
+            sceneStyle, 
+            characters, 
+            optimizeFor, 
+            language, 
+            includeText, 
+            aiModel
+          }),
         }
-      });
+      );
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-      const prompts = data.prompts || "";
-      setGeneratedPrompts(prompts);
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
 
-      // Salvar no banco
-      await supabase.from('scene_prompts').insert({
-        script_content: script.substring(0, 500), // Salvar preview do script
-        prompts,
-        ai_model: aiModel,
-        user_id: user?.id
-      } as any);
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-      await loadHistory();
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n');
 
-      toast({
-        title: "Prompts Gerados!",
-        description: "Os prompts de cena foram criados e salvos com sucesso",
-      });
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.content) {
+                  accumulatedText += data.content;
+                  setGeneratedPrompts(accumulatedText);
+                }
+              } catch (e) {
+                // Ignorar erros de parse
+              }
+            }
+          }
+        }
+      }
+
+      // Salvar no banco após conclusão
+      if (accumulatedText) {
+        await supabase.from('scene_prompts').insert({
+          script_content: script.substring(0, 500),
+          prompts: accumulatedText,
+          ai_model: aiModel,
+          user_id: user?.id
+        } as any);
+
+        await loadHistory();
+
+        toast({
+          title: "Prompts Gerados!",
+          description: "Os prompts de cena foram criados e salvos com sucesso",
+        });
+      }
     } catch (error: any) {
       toast({
         title: "Erro",
