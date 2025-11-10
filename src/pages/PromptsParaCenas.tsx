@@ -79,13 +79,20 @@ const PromptsParaCenas = () => {
     setGeneratedPrompts(""); // Limpar prompts anteriores
     
     try {
+      // Obter token de autenticação do usuário
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        throw new Error("Você precisa estar logado para gerar prompts");
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Authorization': `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({ 
             script, 
@@ -101,7 +108,13 @@ const PromptsParaCenas = () => {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        // Tentar ler erro JSON
+        const contentType = response.headers.get('content-type');
+        if (contentType?.includes('application/json')) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Erro ${response.status}: ${errorData.details || 'Erro desconhecido'}`);
+        }
+        throw new Error(`Erro ${response.status}: ${response.statusText}`);
       }
 
       const reader = response.body?.getReader();
@@ -123,9 +136,12 @@ const PromptsParaCenas = () => {
                 if (data.content) {
                   accumulatedText += data.content;
                   setGeneratedPrompts(accumulatedText);
+                } else if (data.error) {
+                  throw new Error(data.error);
                 }
-              } catch (e) {
-                // Ignorar erros de parse
+              } catch (e: any) {
+                if (e.message) throw e;
+                // Ignorar erros de parse silenciosos
               }
             }
           }
@@ -147,11 +163,14 @@ const PromptsParaCenas = () => {
           title: "Prompts Gerados!",
           description: "Os prompts de cena foram criados e salvos com sucesso",
         });
+      } else {
+        throw new Error("Nenhum conteúdo foi gerado");
       }
     } catch (error: any) {
+      console.error("Erro ao gerar prompts:", error);
       toast({
-        title: "Erro",
-        description: error.message || "Erro ao gerar prompts",
+        title: "Erro ao Gerar Prompts",
+        description: error.message || "Erro desconhecido ao gerar prompts. Tente outro modelo de IA.",
         variant: "destructive",
       });
     } finally {

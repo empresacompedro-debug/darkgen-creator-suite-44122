@@ -663,7 +663,33 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
       const errorData = await response.text();
       console.error('❌ [generate-scene-prompts] Erro da API:', errorData);
       console.error('❌ [generate-scene-prompts] Status:', response.status);
-      throw new Error(`API Error: ${response.status} - ${errorData}`);
+      
+      // Parse error message for better user feedback
+      let errorMessage = 'Erro ao gerar prompts';
+      try {
+        const errorJson = JSON.parse(errorData);
+        if (response.status === 429) {
+          if (aiModel.startsWith('gemini')) {
+            errorMessage = 'Quota do Gemini excedida. Tente outro modelo de IA ou aguarde alguns minutos.';
+          } else if (aiModel.startsWith('claude')) {
+            errorMessage = 'Quota do Claude excedida. Tente outro modelo de IA.';
+          } else {
+            errorMessage = 'Quota da API excedida. Tente outro modelo de IA.';
+          }
+        } else {
+          errorMessage = errorJson.error?.message || errorMessage;
+        }
+      } catch (e) {
+        // Keep default message
+      }
+      
+      return new Response(
+        JSON.stringify({ error: errorMessage, details: errorData }),
+        { 
+          status: response.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      );
     }
 
     // Stream para Claude e Gemini
@@ -725,6 +751,9 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
               }
             }
           }
+        } catch (streamError) {
+          console.error('❌ [generate-scene-prompts] Erro no streaming:', streamError);
+          controller.enqueue(`data: ${JSON.stringify({ error: 'Erro no streaming' })}\n\n`);
         } finally {
           controller.close();
         }
