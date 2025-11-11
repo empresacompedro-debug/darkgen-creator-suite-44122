@@ -535,8 +535,19 @@ const Configuracoes = () => {
 
       toast({
         title: "✅ JSON carregado",
-        description: `Service Account: ${json.client_email}`
+        description: `Service Account: ${json.client_email}. Salvando...`
       });
+
+      // 🔥 AUTO-SALVAR NO BANCO
+      // Aguardar o state ser atualizado
+      setTimeout(async () => {
+        await handleSave('vertex-ai', vertexKeys);
+        toast({
+          title: "✅ Credenciais Vertex AI salvas!",
+          description: "JSON criptografado e armazenado com segurança"
+        });
+      }, 100);
+      
     } catch (error: any) {
       toast({
         title: "❌ Erro ao ler arquivo",
