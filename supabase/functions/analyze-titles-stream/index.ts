@@ -196,7 +196,7 @@ IMPORTANTE:
       }
 
       const vertexRequest = await buildGeminiOrVertexRequest(
-        keyData,
+        { key: keyData.key, provider: 'vertex-ai', vertexConfig: keyData.vertexConfig },
         model,
         prompt,
         true // streaming = true
