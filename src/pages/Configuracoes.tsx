@@ -613,12 +613,16 @@ const Configuracoes = () => {
       });
 
       if (error) throw error;
+      
+      if (!data) {
+        throw new Error('Resposta inválida da função de re-validação');
+      }
 
       // Fallback para estrutura de resposta compatível
       const result = data.results || {
-        reactivated: data.reactivated || 0,
-        stillExhausted: data.stillExhausted || 0,
-        errors: data.errors || 0
+        reactivated: data?.reactivated || 0,
+        stillExhausted: data?.stillExhausted || 0,
+        errors: data?.errors || 0
       };
       
       toast({
