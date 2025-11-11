@@ -46,8 +46,10 @@ serve(async (req) => {
     }
 
     // 2. Fazer chamada de teste ao Vertex AI usando generateContent (endpoint correto)
-    const model = 'gemini-2.0-flash-exp';
+    const model = 'gemini-1.5-flash'; // Modelo estável disponível globalmente
     const testUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
+    
+    console.log(`🧪 [Test Vertex AI] Testando com modelo estável: ${model}`);
     
     console.log(`🔍 [Test Vertex AI] Fazendo chamada de teste para: ${testUrl}`);
 

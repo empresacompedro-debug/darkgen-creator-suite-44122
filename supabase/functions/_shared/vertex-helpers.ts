@@ -14,8 +14,18 @@ export async function buildGeminiOrVertexRequest(
     const { projectId, location, serviceAccountJson } = keyData.vertexConfig;
     const accessToken = await getVertexAccessToken(serviceAccountJson);
     
-    // Mapear modelo Gemini para Vertex AI
-    const vertexModel = model.replace('gemini-', 'gemini-').replace('2.5', '2.0'); // Vertex usa naming diferente
+    // Mapeamento correto baseado na documentação oficial do Vertex AI
+    // https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini
+    const modelMapping: Record<string, string> = {
+      'gemini-2.5-pro': 'gemini-1.5-pro',
+      'gemini-2.5-flash': 'gemini-1.5-flash',
+      'gemini-2.5-flash-lite': 'gemini-1.5-flash',
+      'gemini-1.5-pro': 'gemini-1.5-pro',
+      'gemini-1.5-flash': 'gemini-1.5-flash',
+    };
+    
+    const vertexModel = modelMapping[model] || 'gemini-1.5-flash';
+    console.log(`🔄 [Vertex Helper] Mapeando modelo: ${model} → ${vertexModel}`);
     
     const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${vertexModel}:${stream ? 'streamGenerateContent' : 'generateContent'}`;
     
