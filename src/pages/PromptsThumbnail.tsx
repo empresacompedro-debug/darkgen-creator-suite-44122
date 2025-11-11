@@ -277,6 +277,16 @@ const PromptsThumbnail = () => {
     // Criar AbortController para poder cancelar
     const controller = new AbortController();
     setAbortController(controller);
+    
+    // Timeout de 60 segundos
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      toast({
+        title: '⏱️ Timeout',
+        description: 'A análise demorou muito. Tente novamente.',
+        variant: 'destructive'
+      });
+    }, 60000);
 
     try {
       let imageBase64 = '';
@@ -292,8 +302,15 @@ const PromptsThumbnail = () => {
       // Obter o token da sessão do usuário autenticado
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        clearTimeout(timeoutId);
         throw new Error('Usuário não autenticado');
       }
+      
+      // Mostrar toast de início
+      toast({
+        title: '🔍 Analisando...',
+        description: 'Conectando ao modelo de IA...'
+      });
       
       const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-thumbnail-streaming`;
       
@@ -315,19 +332,36 @@ const PromptsThumbnail = () => {
       });
 
       if (!response.ok) {
+        clearTimeout(timeoutId);
         const errorText = await response.text();
+        console.error('❌ [Frontend] HTTP Error:', response.status, errorText);
         throw new Error(`Erro ao analisar imagem: ${response.status} - ${errorText}`);
       }
+      
+      console.log('✅ [Frontend] Stream connection established');
 
       // Ler streaming response
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let fullPromptText = ''; // Acumular todo o texto aqui localmente
+      let receivedFirstChunk = false;
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          console.log('✅ [Frontend] Stream finished');
+          break;
+        }
+        
+        if (!receivedFirstChunk) {
+          receivedFirstChunk = true;
+          console.log('📦 [Frontend] First chunk received');
+          toast({
+            title: '📡 Recebendo dados...',
+            description: 'Streaming iniciado com sucesso'
+          });
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -338,9 +372,12 @@ const PromptsThumbnail = () => {
             const dataStr = line.slice(6).trim();
             
             if (dataStr === '[DONE]') {
+              clearTimeout(timeoutId);
               setAnalysisComplete(true);
               setIsAnalyzing(false);
               setAbortController(null);
+              
+              console.log('✅ [Frontend] Analysis complete. Total text length:', fullPromptText.length);
               
               // Tentar fazer parse do JSON do texto completo acumulado
               try {
@@ -356,13 +393,14 @@ const PromptsThumbnail = () => {
                     description: 'Prompts estruturados gerados com sucesso.'
                   });
                 } else {
+                  console.warn('⚠️ [Frontend] No JSON found in response');
                   toast({
                     title: '✅ Análise Concluída!',
                     description: 'Prompt gerado com sucesso.'
                   });
                 }
               } catch (e) {
-                console.error('Error parsing JSON from prompt:', e);
+                console.error('❌ [Frontend] Error parsing JSON:', e);
                 toast({
                   title: '✅ Análise Concluída!',
                   description: 'Prompt gerado (formato não estruturado).'
@@ -389,6 +427,8 @@ const PromptsThumbnail = () => {
       }
 
     } catch (error: any) {
+      clearTimeout(timeoutId);
+      
       if (error.name === 'AbortError') {
         console.log('🛑 [Frontend] Analysis canceled by user');
         toast({
@@ -397,9 +437,19 @@ const PromptsThumbnail = () => {
         });
       } else {
         console.error('❌ [Frontend] Analysis error:', error);
+        
+        let errorMessage = error.message;
+        if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+          errorMessage = 'Erro de autenticação. Faça login novamente.';
+        } else if (errorMessage.includes('500')) {
+          errorMessage = 'Erro no servidor. Tente novamente em alguns instantes.';
+        } else if (!errorMessage) {
+          errorMessage = 'Erro desconhecido. Verifique sua conexão.';
+        }
+        
         toast({
           title: 'Erro na Análise',
-          description: error.message,
+          description: errorMessage,
           variant: 'destructive'
         });
       }

@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { getApiKey } from "../_shared/get-api-key.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,55 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    // Obter o token do Authorization header
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) {
-      console.error('❌ No authorization header');
-      return new Response(JSON.stringify({ error: 'No authorization header' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY');
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('❌ Missing environment variables:', { 
-        hasUrl: !!supabaseUrl, 
-        hasKey: !!supabaseKey 
-      });
-      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Criar cliente Supabase com o token do usuário
-    const supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      global: { 
-        headers: { 
-          Authorization: authHeader 
-        } 
-      },
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false
-      }
-    });
-
-    // Validar o usuário
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
-    
-    if (authError || !user) {
-      console.error('❌ Authentication failed:', authError?.message || 'User not found');
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    console.log('✅ User authenticated:', user.id);
+    console.log('📨 [Analyze Streaming] Request received');
 
     const { imageBase64, modelingLevel, aiModel, customInstructions, includeText, desiredText } = await req.json();
 
@@ -77,133 +28,62 @@ serve(async (req) => {
       imageSize: imageBase64.length
     });
 
-    // Determinar provider
+    // Determinar provider e buscar API key globalmente
     let provider: 'claude' | 'gemini' | 'openai' = 'gemini';
     let model = 'gemini-2.0-flash-exp';
+    let apiKey = '';
     
     if (aiModel.includes('claude')) {
       provider = 'claude';
       model = aiModel === 'claude-sonnet-4.5' ? 'claude-sonnet-4-20250514' : 'claude-sonnet-4-20250318';
+      apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
     } else if (aiModel.includes('gpt')) {
       provider = 'openai';
       model = 'gpt-4o';
+      apiKey = Deno.env.get('OPENAI_API_KEY') || '';
     } else if (aiModel.includes('gemini')) {
       provider = 'gemini';
       model = aiModel === 'gemini-2.5-pro' ? 'gemini-2.0-flash-exp' : 'gemini-2.0-flash-exp';
+      apiKey = Deno.env.get('GEMINI_API_KEY') || '';
     }
 
-    // Obter API key
-    const apiKeyResult = await getApiKey(user.id, provider, supabaseClient);
-    if (!apiKeyResult) throw new Error(`No ${provider} API key found`);
-    const apiKey = apiKeyResult.key;
+    // Fallback: tentar outros providers se o selecionado não tiver API key
+    if (!apiKey) {
+      console.warn(`⚠️ No API key for ${provider}, trying fallback...`);
+      
+      const geminiKey = Deno.env.get('GEMINI_API_KEY');
+      const claudeKey = Deno.env.get('ANTHROPIC_API_KEY');
+      const openaiKey = Deno.env.get('OPENAI_API_KEY');
+      
+      if (geminiKey) {
+        provider = 'gemini';
+        model = 'gemini-2.0-flash-exp';
+        apiKey = geminiKey;
+        console.log('🔄 Fallback to Gemini');
+      } else if (claudeKey) {
+        provider = 'claude';
+        model = 'claude-sonnet-4-20250514';
+        apiKey = claudeKey;
+        console.log('🔄 Fallback to Claude');
+      } else if (openaiKey) {
+        provider = 'openai';
+        model = 'gpt-4o';
+        apiKey = openaiKey;
+        console.log('🔄 Fallback to OpenAI');
+      } else {
+        throw new Error('No API keys configured for any provider');
+      }
+    }
 
-    // Criar prompts baseados no nível e modo de texto
-    const masterSystemPrompt = `🧠 PROMPT MESTRE — Interpretação e Modelagem de Thumbnails
+    console.log(`✅ API key obtained for provider: ${provider}`);
 
-Você é um sistema especializado em interpretação visual de thumbnails de YouTube e geração de prompts técnicos detalhados para recriá-las em ferramentas de geração de imagem (Hugging Face, Pollinations, Stable Diffusion, Leonardo AI ou Midjourney).
-
-Sua tarefa é analisar e retornar um prompt técnico descritivo, completo e reproduzível, contendo:
-
-📌 TEMA E CONTEXTO — tipo de vídeo (histórico, curioso, emocional, educativo, etc.) e mensagem geral da thumbnail.
-
-📌 COMPOSIÇÃO VISUAL — número e posição das pessoas ou objetos, enquadramento, fundo, perspectiva e iluminação.
-
-📌 ESTILO ARTÍSTICO OU FOTOGRÁFICO — (cinematográfico, vintage, digital painting, hiper-realista, flat, etc.).
-
-📌 CORES E ATMOSFERA — paleta dominante, contraste, brilho e sensação visual.
-
-📌 TEXTO (SE HOUVER) — conteúdo exato do texto, cor, fonte, tamanho e posição (inferior, central, lateral).
-
-📌 OUTROS DETALHES TÉCNICOS — textura, tipo de lente, qualidade da imagem, profundidade de campo, ruído, e proporção recomendada (16:9).
-
-O estilo do texto deve ser técnico e objetivo, ideal para modelos como Hugging Face, Pollinations e Stable Diffusion, priorizando descrições concretas e evitando linguagem poética ou subjetiva.
-
-Importante: foque no que está visível, não no significado simbólico da imagem.
-
-RETORNE a análise em formato JSON com a seguinte estrutura:
-{
-  "prompt_com_texto": "descrição detalhada incluindo todo o texto presente",
-  "prompt_sem_texto": "a mesma descrição, mas omitindo qualquer texto",
-  "metadata": {
-    "tema": "string",
-    "estilo": "string",
-    "emocao": "string",
-    "paleta_cores": ["cor1", "cor2", "cor3"],
-    "quantidade_pessoas": number,
-    "plano": "string (close, médio, geral, etc)",
-    "epoca": "string",
-    "ambiente": "string"
-  }
-}`;
+    // Criar prompt simplificado para testes (temporário)
+    const masterSystemPrompt = "Você é um especialista em análise de thumbnails do YouTube. Analise esta imagem e gere um prompt técnico detalhado para recriá-la em ferramentas de geração de imagem. RETORNE em formato JSON: { \"prompt_com_texto\": \"descrição completa incluindo texto\", \"prompt_sem_texto\": \"mesma descrição sem texto\", \"metadata\": { \"tema\": \"string\", \"estilo\": \"string\", \"paleta_cores\": [\"cor1\", \"cor2\"], \"quantidade_pessoas\": number } }";
 
     const systemPrompts = {
-      identical: `${masterSystemPrompt}
-
-NÍVEL: IDÊNTICO - Recriação pixel-perfect
-
-Analise cuidadosamente esta imagem com extremo requinte de detalhes.
-
-ANÁLISE REQUERIDA:
-- Descreva TODOS os elementos visuais com precisão fotográfica
-- Especifique cores exatas (tons, saturação, brilho)
-- Detalhe posicionamento preciso de CADA elemento
-- Descreva expressões faciais, ângulos de câmera, iluminação
-- Para prompt_com_texto: Inclua TODOS os textos visíveis (fontes, tamanhos, cores, efeitos, posição exata)
-- Para prompt_sem_texto: Omita completamente qualquer menção a texto
-- Mencione estilo artístico, técnicas de composição
-- Detalhe texturas, sombras, profundidade
-- Especifique resolução e qualidade esperadas
-
-FORMATO DOS PROMPTS:
-Cada prompt (com_texto e sem_texto) deve ser um parágrafo fluido e técnico de 300-500 palavras, descrevendo a imagem de forma precisa e reproduzível para modelos de geração de imagem.
-
-RETORNE APENAS O JSON, sem texto adicional antes ou depois.`,
-
-      similar: `${masterSystemPrompt}
-
-NÍVEL: SIMILAR - Captura de estilo e essência
-
-Analise cuidadosamente esta imagem focando no ESTILO VISUAL DOMINANTE.
-
-ANÁLISE REQUERIDA:
-- Identifique e descreva o estilo visual dominante
-- Capture a paleta de cores principal
-- Descreva o layout e composição geral
-- Identifique padrões visuais e elementos recorrentes
-- Mencione técnicas artísticas utilizadas
-- Descreva mood, atmosfera e impacto visual
-- Inclua tipo de conteúdo (pessoa, objeto, paisagem, etc)
-- Para prompt_com_texto: Descreva o estilo geral e posicionamento do texto
-- Para prompt_sem_texto: Omita completamente qualquer menção a texto
-- Especifique elementos de design (efeitos, filtros)
-
-FORMATO DOS PROMPTS:
-Cada prompt deve ser um parágrafo fluido e técnico de 200-300 palavras, focando em ESTILO, não em replicação exata.
-
-RETORNE APENAS O JSON, sem texto adicional antes ou depois.`,
-
-      concept: `${masterSystemPrompt}
-
-NÍVEL: CONCEITUAL - Ideia central e reimaginação
-
-Analise esta imagem focando no CONCEITO e MENSAGEM CENTRAL.
-
-ANÁLISE REQUERIDA:
-- Identifique o conceito/ideia principal transmitida
-- Capture a emoção e mensagem central
-- Descreva o tema e narrativa visual
-- Mencione elementos simbólicos visuais (não metafóricos)
-- Analise o impacto visual da composição
-- Identifique arquétipos visuais utilizados
-- Sugira direções criativas para reimaginação
-- Para prompt_com_texto: Mencione o papel do texto na mensagem geral
-- Para prompt_sem_texto: Omita completamente qualquer menção a texto
-- Foque em "O QUE" a imagem comunica visualmente
-
-FORMATO DOS PROMPTS:
-Cada prompt deve ser um parágrafo fluido e técnico de 150-250 palavras, focando na IDEIA CENTRAL e possibilidades criativas.
-
-RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
+      identical: `${masterSystemPrompt}\n\nNÍVEL: IDÊNTICO - Descreva tudo com máximo detalhe.`,
+      similar: `${masterSystemPrompt}\n\nNÍVEL: SIMILAR - Foque no estilo geral.`,
+      concept: `${masterSystemPrompt}\n\nNÍVEL: CONCEITUAL - Capture a ideia principal.`
     };
 
     let analysisPrompt = systemPrompts[modelingLevel as keyof typeof systemPrompts];
@@ -226,6 +106,7 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
           // Claude streaming
           if (provider === 'claude') {
             console.log('📡 [Claude] Starting streaming request...');
+            console.log('🔑 [Claude] API key present:', !!apiKey);
             
             const response = await fetch('https://api.anthropic.com/v1/messages', {
               method: 'POST',
@@ -260,15 +141,22 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
 
             if (!response.ok) {
               const errorText = await response.text();
+              console.error('❌ [Claude] API error:', response.status, errorText);
               throw new Error(`Claude API error: ${response.status} - ${errorText}`);
             }
+            
+            console.log('✅ [Claude] Response received, starting stream read...');
 
             const reader = response.body!.getReader();
             const decoder = new TextDecoder();
+            let chunkCount = 0;
             
             while (true) {
               const { done, value } = await reader.read();
-              if (done) break;
+              if (done) {
+                console.log(`✅ [Claude] Stream complete. Total chunks: ${chunkCount}`);
+                break;
+              }
 
               const text = decoder.decode(value, { stream: true });
               const lines = text.split('\n');
@@ -282,10 +170,14 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
                     const data = JSON.parse(jsonStr);
                     
                     if (data.type === 'content_block_delta' && data.delta?.text) {
+                      chunkCount++;
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: data.delta.text })}\n\n`));
+                      if (chunkCount % 10 === 0) {
+                        console.log(`📦 [Claude] Sent ${chunkCount} chunks`);
+                      }
                     }
                   } catch (e) {
-                    console.error('Error parsing Claude SSE:', e);
+                    console.error('❌ [Claude] Error parsing SSE:', e);
                   }
                 }
               }
@@ -294,6 +186,7 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
           // Gemini (simulação de streaming)
           else if (provider === 'gemini') {
             console.log('📡 [Gemini] Starting request...');
+            console.log('🔑 [Gemini] API key present:', !!apiKey);
             
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
             
@@ -321,13 +214,20 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
 
             if (!response.ok) {
               const errorText = await response.text();
+              console.error('❌ [Gemini] API error:', response.status, errorText);
               throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
             }
 
+            console.log('✅ [Gemini] Response received');
             const data = await response.json();
             let fullText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
             
-            if (!fullText) throw new Error('No text generated from Gemini');
+            if (!fullText) {
+              console.error('❌ [Gemini] No text in response');
+              throw new Error('No text generated from Gemini');
+            }
+            
+            console.log(`📝 [Gemini] Generated text length: ${fullText.length} chars`);
 
             // Tentar extrair JSON da resposta
             let jsonMatch = fullText.match(/\{[\s\S]*\}/);
@@ -343,15 +243,23 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
 
             // Simular streaming por sentenças (mais rápido e natural)
             const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+            console.log(`📦 [Gemini] Streaming ${sentences.length} chunks`);
+            
             for (let i = 0; i < sentences.length; i++) {
               const chunk = sentences[i];
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
+              if (i % 5 === 0) {
+                console.log(`📦 [Gemini] Sent chunk ${i + 1}/${sentences.length}`);
+              }
               await new Promise(r => setTimeout(r, 50)); // 50ms entre sentenças
             }
+            
+            console.log('✅ [Gemini] Streaming complete');
           }
           // OpenAI streaming
           else if (provider === 'openai') {
             console.log('📡 [OpenAI] Starting streaming request...');
+            console.log('🔑 [OpenAI] API key present:', !!apiKey);
             
             const response = await fetch('https://api.openai.com/v1/chat/completions', {
               method: 'POST',
@@ -382,15 +290,21 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
 
             if (!response.ok) {
               const errorText = await response.text();
+              console.error('❌ [OpenAI] API error:', response.status, errorText);
               throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
             }
 
+            console.log('✅ [OpenAI] Response received, starting stream read...');
             const reader = response.body!.getReader();
             const decoder = new TextDecoder();
+            let chunkCount = 0;
 
             while (true) {
               const { done, value } = await reader.read();
-              if (done) break;
+              if (done) {
+                console.log(`✅ [OpenAI] Stream complete. Total chunks: ${chunkCount}`);
+                break;
+              }
 
               const text = decoder.decode(value, { stream: true });
               const lines = text.split('\n').filter(l => l.trim());
@@ -404,10 +318,14 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
                     const data = JSON.parse(jsonStr);
                     const chunk = data.choices?.[0]?.delta?.content;
                     if (chunk) {
+                      chunkCount++;
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
+                      if (chunkCount % 10 === 0) {
+                        console.log(`📦 [OpenAI] Sent ${chunkCount} chunks`);
+                      }
                     }
                   } catch (e) {
-                    console.error('Error parsing OpenAI SSE:', e);
+                    console.error('❌ [OpenAI] Error parsing SSE:', e);
                   }
                 }
               }
