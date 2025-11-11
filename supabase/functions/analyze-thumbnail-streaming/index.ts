@@ -27,12 +27,27 @@ serve(async (req) => {
       throw new Error('Supabase configuration is missing');
     }
 
+    // Criar cliente com o Authorization header do usuário
     const supabaseClient = createClient(supabaseUrl, supabaseKey, {
-      global: { headers: { Authorization: authHeader } }
+      global: { 
+        headers: { 
+          Authorization: authHeader 
+        } 
+      },
+      auth: {
+        persistSession: false
+      }
     });
 
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (!user) throw new Error('Unauthorized');
+    // Verificar se o usuário está autenticado
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
+    
+    if (authError || !user) {
+      console.error('❌ Authentication failed:', authError?.message);
+      throw new Error('Unauthorized');
+    }
+
+    console.log('✅ User authenticated:', user.id);
 
     const { imageBase64, modelingLevel, aiModel, customInstructions, includeText, desiredText } = await req.json();
 
