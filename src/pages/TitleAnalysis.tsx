@@ -14,9 +14,8 @@ interface AnalysisResult {
 
 export default function TitleAnalysis() {
   const [rawData, setRawData] = useState("");
-  const [aiModel, setAiModel] = useState("gemini-2.5-flash");
+  const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [loading, setLoading] = useState(false);
-  const [liveOutput, setLiveOutput] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const { toast } = useToast();
 
@@ -31,100 +30,18 @@ export default function TitleAnalysis() {
     }
 
     setLoading(true);
-    setLiveOutput("");
-    setResult(null);
-
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-titles-stream`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ rawData, aiModel }),
-        }
-      );
+      const { data, error } = await supabase.functions.invoke('analyze-titles', {
+        body: { rawData, aiModel }
+      });
 
-      if (!response.ok || !response.body) {
-        throw new Error(`Falha ao iniciar análise: ${response.status}`);
-      }
+      if (error) throw error;
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulatedText = "";
-      let textBuffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") {
-            setResult({ markdownReport: accumulatedText });
-            toast({
-              title: "✅ Análise concluída!",
-              description: "Relatório gerado com sucesso"
-            });
-            break;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            
-            if (parsed.error) {
-              throw new Error(parsed.error);
-            }
-
-            const content = parsed.text;
-            if (content) {
-              accumulatedText += content;
-              setLiveOutput(accumulatedText);
-            }
-          } catch (e: any) {
-            if (e.message && e.message !== "Unexpected end of JSON input") {
-              throw e;
-            }
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
-        }
-      }
-
-      // Flush final
-      if (textBuffer.trim()) {
-        for (let raw of textBuffer.split("\n")) {
-          if (!raw || raw.startsWith(":") || !raw.startsWith("data: ")) continue;
-          const jsonStr = raw.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.error) throw new Error(parsed.error);
-            const content = parsed.text;
-            if (content) {
-              accumulatedText += content;
-              setLiveOutput(accumulatedText);
-            }
-          } catch {}
-        }
-      }
-
-      if (!result && accumulatedText) {
-        setResult({ markdownReport: accumulatedText });
-      }
-
+      setResult(data);
+      toast({
+        title: "✅ Análise concluída!",
+        description: `Análise realizada com sucesso`
+      });
     } catch (error: any) {
       console.error("Erro na análise:", error);
       toast({
@@ -209,60 +126,8 @@ há 12 horas
         </CardContent>
       </Card>
 
-      {/* Live Output - IA trabalhando */}
-      {loading && liveOutput && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              IA trabalhando...
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown
-                components={{
-                  h1: ({ children }) => (
-                    <h1 className="text-3xl font-bold mb-4 text-foreground border-b pb-2">{children}</h1>
-                  ),
-                  h2: ({ children }) => (
-                    <h2 className="text-2xl font-bold mt-8 mb-4 text-foreground">{children}</h2>
-                  ),
-                  h3: ({ children }) => (
-                    <h3 className="text-xl font-semibold mt-6 mb-3 text-foreground">{children}</h3>
-                  ),
-                  ul: ({ children }) => (
-                    <ul className="list-disc pl-6 space-y-2 mb-4 text-foreground">{children}</ul>
-                  ),
-                  ol: ({ children }) => (
-                    <ol className="list-decimal pl-6 space-y-2 mb-4 text-foreground">{children}</ol>
-                  ),
-                  li: ({ children }) => (
-                    <li className="text-foreground">{children}</li>
-                  ),
-                  p: ({ children }) => (
-                    <p className="mb-4 text-foreground leading-relaxed">{children}</p>
-                  ),
-                  strong: ({ children }) => (
-                    <strong className="font-bold text-foreground">{children}</strong>
-                  ),
-                  code: ({ children }) => (
-                    <code className="bg-accent px-2 py-1 rounded text-sm font-mono text-foreground">{children}</code>
-                  ),
-                  pre: ({ children }) => (
-                    <pre className="bg-accent p-4 rounded-lg overflow-x-auto mb-4 text-foreground">{children}</pre>
-                  ),
-                }}
-              >
-                {liveOutput}
-              </ReactMarkdown>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Resultados */}
-      {result && !loading && (
+      {result && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-foreground">🎯 Relatório Completo</h2>
