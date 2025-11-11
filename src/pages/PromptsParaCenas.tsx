@@ -34,6 +34,7 @@ const PromptsParaCenas = () => {
   const [generatedPrompts, setGeneratedPrompts] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
 
   useEffect(() => {
     loadHistory();
@@ -53,222 +54,200 @@ const PromptsParaCenas = () => {
     }
   };
 
-  // ============================================
-  // AUTO-REFRESH DE SESSÃO
-  // ============================================
-  const ensureValidSession = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      throw new Error("Você precisa estar logado para gerar prompts");
-    }
-    
-    // Verificar se a sessão está próxima de expirar (< 5 minutos)
-    const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
-    const now = Date.now();
-    
-    if (expiresAt - now < 5 * 60 * 1000) { // < 5 minutos
-      console.log('🔄 Sessão próxima de expirar, renovando...');
-      const { data: { session: newSession }, error } = await supabase.auth.refreshSession();
-      
-      if (error || !newSession) {
-        throw new Error("Sua sessão expirou. Por favor, faça login novamente.");
-      }
-      
-      return newSession;
-    }
-    
-    return session;
-  };
-
   const handleGeneratePrompts = async () => {
     if (!script.trim()) {
       toast({
-        title: "Erro",
-        description: "Cole o roteiro completo para gerar os prompts",
+        title: "Roteiro vazio",
+        description: "Por favor, insira um roteiro antes de gerar os prompts.",
         variant: "destructive",
       });
       return;
     }
 
-    // Validar personagens
-    const missingDetails = characters.filter(c => 
-      !c.name || !c.age || !c.faceShape || !c.eyes || !c.hair || !c.physique || !c.skinTone || !c.clothing
-    );
-
-    if (missingDetails.length > 0) {
-      toast({
-        title: "Atenção: Dados Incompletos",
-        description: `${missingDetails.length} personagem(ns) sem detalhes completos. Recomendamos preencher todos os campos obrigatórios (*) para máxima consistência visual.`,
-        variant: "destructive",
-      });
-    }
-
     setIsLoading(true);
-    setGeneratedPrompts(""); // Limpar prompts anteriores
-    
-    // AbortController para cancelamento
+    setGenerationProgress(5);
+    setGeneratedPrompts("");
+
     const abortController = new AbortController();
-    
+    const STREAM_TIMEOUT = 180000; // 3 minutos
+    let lastChunkTime = Date.now();
+    let warningShown = false;
+
+    const timeoutChecker = setInterval(() => {
+      const timeSinceLastChunk = Date.now() - lastChunkTime;
+      
+      if (timeSinceLastChunk > 60000 && !warningShown) {
+        console.log('⏳ Geração lenta detectada (60s). Aguardando...');
+        setGenerationProgress(prev => Math.min(prev + 5, 70));
+        warningShown = true;
+      }
+      
+      if (timeSinceLastChunk > STREAM_TIMEOUT) {
+        console.error('⏱️ Stream timeout - sem dados por 3min');
+        abortController.abort();
+        clearInterval(timeoutChecker);
+      }
+    }, 10000);
+
     try {
-      // Garantir sessão válida
-      const session = await ensureValidSession();
+      console.log('🚀 Iniciando geração de prompts...');
+      setGenerationProgress(10);
 
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts-v2`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`,
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
-          body: JSON.stringify({ 
-            script, 
-            generationMode, 
-            sceneStyle, 
-            characters, 
-            optimizeFor, 
-            language, 
-            includeText, 
-            aiModel
+          body: JSON.stringify({
+            script,
+            generationMode,
+            sceneStyle,
+            characters,
+            optimizeFor,
+            language,
+            includeText,
+            aiModel,
           }),
           signal: abortController.signal,
         }
       );
 
       if (!response.ok) {
-        // Tentar ler erro JSON
-        const contentType = response.headers.get('content-type');
-        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-        
-        if (contentType?.includes('application/json')) {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.details || errorMessage;
-        }
-        
-        // Mensagens específicas por tipo de erro
-        if (response.status === 429) {
-          errorMessage = '⚠️ Limite de quota excedido. Aguarde alguns minutos ou adicione outra API key em Configurações.';
-        } else if (response.status === 400 && errorMessage.includes('safety')) {
-          errorMessage = '🚫 Conteúdo bloqueado por filtro de segurança. Ajuste o roteiro ou tente outro modelo de IA.';
-        } else if (errorMessage.includes('Nenhuma chave')) {
-          errorMessage = '🔑 ' + errorMessage;
-        }
-        
-        throw new Error(errorMessage);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro HTTP: ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
+      if (!response.body) {
+        throw new Error("Resposta sem corpo");
+      }
+
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulatedText = "";
-      let lastChunkTime = Date.now();
-      const STREAM_TIMEOUT = 180000; // ✅ 3 minutos (era 30s)
-      let warningShown = false;
+      let buffer = "";
 
-      // ✅ Timeout com aviso progressivo
-      const timeoutChecker = setInterval(() => {
-        const timeSinceLastChunk = Date.now() - lastChunkTime;
-        
-        // ✅ Aviso aos 60s
-        if (timeSinceLastChunk > 60000 && !warningShown) {
-          console.log('⏳ Geração lenta detectada (60s). Aguardando...');
-          warningShown = true;
+      setGenerationProgress(20);
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          console.log('✅ Stream concluído');
+          break;
         }
+
+        lastChunkTime = Date.now();
+        buffer += decoder.decode(value, { stream: true });
         
-        // ✅ Abort apenas após 3 minutos
-        if (timeSinceLastChunk > STREAM_TIMEOUT) {
-          console.error('⏱️ Stream timeout - sem dados por 3min');
-          abortController.abort();
-          clearInterval(timeoutChecker);
-        }
-      }, 10000); // Checar a cada 10s
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      if (reader) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(':')) continue;
 
-            const chunk = decoder.decode(value);
-            const lines = chunk.split('\n');
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') {
+              console.log('🏁 Recebido [DONE]');
+              continue;
+            }
 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  
-                  if (data.content) {
-                    accumulatedText += data.content;
-                    setGeneratedPrompts(accumulatedText);
-                    lastChunkTime = Date.now();
-                    console.log(`📥 Chunk recebido (${accumulatedText.length} chars acumulados)`);
-                  } else if (data.error) {
-                    throw new Error(data.error);
-                  } else if (data.heartbeat) {
-                    // Heartbeat do servidor - stream ainda ativo
-                    lastChunkTime = Date.now();
-                    console.log('💓 Heartbeat recebido - stream ativo');
-                  }
-                } catch (e: any) {
-                  if (e.message && !e.message.includes('JSON')) throw e;
-                  // Ignorar erros de parse parcial silenciosos
-                }
+            try {
+              const parsed = JSON.parse(data);
+              
+              // Accept both {text} (new standard) and {content} (fallback)
+              const chunk = parsed.text || parsed.content || '';
+              
+              if (chunk) {
+                accumulatedText += chunk;
+                setGeneratedPrompts(accumulatedText);
+                setGenerationProgress(prev => Math.min(prev + 1, 90));
               }
+              
+              if (parsed.heartbeat) {
+                console.log('💓 Heartbeat recebido');
+              }
+            } catch (parseError) {
+              console.error('Erro ao parsear JSON:', parseError, 'Data:', data);
             }
           }
-        } finally {
-          clearInterval(timeoutChecker);
         }
       }
 
-      // Salvar no banco após conclusão
-      if (accumulatedText) {
-        await supabase.from('scene_prompts').insert({
-          script_content: script.substring(0, 500),
-          prompts: accumulatedText,
-          ai_model: aiModel,
-          user_id: user?.id
-        } as any);
+      clearInterval(timeoutChecker);
 
-        await loadHistory();
-
-        toast({
-          title: "Prompts Gerados!",
-          description: "Os prompts de cena foram criados e salvos com sucesso",
-        });
-      } else {
+      if (!accumulatedText.trim()) {
         throw new Error("Nenhum conteúdo foi gerado");
       }
+
+      setGenerationProgress(95);
+
+      // Save to database
+      if (user) {
+        const { error: saveError } = await supabase.from("scene_prompts").insert({
+          user_id: user.id,
+          script_content: script.substring(0, 500),
+          prompts: accumulatedText,
+          generation_mode: generationMode,
+          scene_style: sceneStyle,
+          characters,
+          optimize_for: optimizeFor,
+          language,
+          include_text: includeText,
+          ai_model: aiModel,
+        });
+
+        if (saveError) {
+          console.error("Erro ao salvar prompts:", saveError);
+          toast({
+            title: "Aviso",
+            description: "Prompts gerados mas não foi possível salvar no histórico.",
+            variant: "destructive",
+          });
+        } else {
+          await loadHistory();
+        }
+      }
+
+      setGenerationProgress(100);
+      toast({
+        title: "✅ Prompts Gerados!",
+        description: `${accumulatedText.split('**Cena').length - 1} cenas criadas com sucesso.`,
+      });
+
     } catch (error: any) {
       console.error("Erro ao gerar prompts:", error);
+      clearInterval(timeoutChecker);
       
       let errorMessage = error.message || "Erro desconhecido ao gerar prompts.";
       let errorTitle = "Erro ao Gerar Prompts";
       
-      // ✅ Mensagens específicas e acionáveis
       if (error.name === 'AbortError') {
         errorTitle = "⏱️ Timeout de Geração";
-        errorMessage = "A geração demorou mais de 3 minutos. Isso pode acontecer com roteiros muito longos. Tente:\n• Dividir o roteiro em partes menores\n• Usar o modo de geração 'Por Fala' ao invés de 'Automático'\n• Verificar se sua API key está ativa";
-      } else if (errorMessage.includes('sessão expirou')) {
-        errorTitle = "🔐 Sessão Expirada";
-        errorMessage = "Por favor, recarregue a página (F5) e faça login novamente.";
-      } else if (errorMessage.includes('safety') || errorMessage.includes('bloqueado')) {
+        errorMessage = "A geração demorou mais de 3 minutos. Tente:\n• Dividir o roteiro em partes menores\n• Usar o modo 'Por Fala' ao invés de 'Automático'\n• Verificar se sua chave de API está ativa em Configurações";
+      } else if (errorMessage.includes('Limite de requisições')) {
+        errorTitle = "⚠️ Limite Atingido";
+        errorMessage = "Limite de requisições da API atingido. Aguarde alguns minutos ou adicione outra chave em Configurações.";
+      } else if (errorMessage.includes('bloqueado por políticas')) {
         errorTitle = "🚫 Conteúdo Bloqueado";
-        errorMessage = "O modelo de IA bloqueou o conteúdo por políticas de segurança. Tente:\n• Ajustar o roteiro (remover termos sensíveis)\n• Usar outro modelo de IA (ex: trocar Claude por GPT)\n• Contatar suporte se o conteúdo é adequado";
-      } else if (errorMessage.includes('quota') || errorMessage.includes('429')) {
-        errorTitle = "⚠️ Limite de Quota";
-        errorMessage = "API key esgotada. Adicione outra chave em Configurações ou aguarde a renovação.";
+        errorMessage = "O modelo bloqueou o conteúdo por políticas de segurança. Tente:\n• Ajustar o roteiro (remover termos sensíveis)\n• Usar outro modelo de IA (Claude/GPT)\n• Contatar suporte se o conteúdo é adequado";
+      } else if (errorMessage.includes('Nenhuma chave de API')) {
+        errorTitle = "🔑 Chave de API Necessária";
+        errorMessage = "Configure pelo menos uma chave de API em Configurações para gerar prompts.";
       }
       
       toast({
         title: errorTitle,
         description: errorMessage,
         variant: "destructive",
-        duration: 10000, // ✅ Mensagem mais longa para ler
+        duration: 10000,
       });
     } finally {
       setIsLoading(false);
+      setGenerationProgress(0);
     }
   };
 

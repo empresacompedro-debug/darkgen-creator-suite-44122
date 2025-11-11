@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.batch-niche-search]
 verify_jwt = false
+
+[functions.generate-scene-prompts-v2]
+verify_jwt = false
