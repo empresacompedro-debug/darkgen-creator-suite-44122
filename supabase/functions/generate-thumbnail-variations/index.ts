@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { HfInference } from 'https://esm.sh/@huggingface/inference@2.3.2';
+import { HfInference } from 'https://esm.sh/@huggingface/inference@2.7.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -67,6 +67,20 @@ serve(async (req) => {
   }
 });
 
+// Helper function to convert ArrayBuffer to base64 without stack overflow
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 8192; // Process in chunks to avoid stack overflow
+  
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  
+  return btoa(binary);
+}
+
 async function generateWithPollinations(prompt: string, model: string): Promise<string> {
   const encodedPrompt = encodeURIComponent(prompt);
   let url = '';
@@ -94,7 +108,7 @@ async function generateWithPollinations(prompt: string, model: string): Promise<
   if (!response.ok) throw new Error(`Pollinations error: ${response.status}`);
 
   const arrayBuffer = await response.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+  const base64 = arrayBufferToBase64(arrayBuffer);
   return `data:image/png;base64,${base64}`;
 }
 
@@ -112,23 +126,28 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
 
   try {
-    // Usar a biblioteca oficial do HuggingFace
+    // Usar versão atualizada da biblioteca (2.7.0+) que usa automaticamente o novo endpoint
     const hf = new HfInference(token);
     
     const image = await hf.textToImage({
-      inputs: prompt,
       model: modelId,
+      inputs: prompt,
     });
 
-    // Converter blob para base64
+    // Converter blob para base64 usando função segura
     const arrayBuffer = await image.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const base64 = arrayBufferToBase64(arrayBuffer);
     
     console.log(`✅ [HuggingFace] Image generated successfully`);
     return `data:image/png;base64,${base64}`;
     
   } catch (error: any) {
-    console.error(`❌ [HuggingFace] Error:`, error.message);
+    console.error(`❌ [HuggingFace] Error details:`, {
+      message: error.message,
+      status: error.status,
+      response: error.response,
+      stack: error.stack
+    });
     throw new Error(`HuggingFace error: ${error.message}`);
   }
 }
