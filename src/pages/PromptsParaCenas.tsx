@@ -15,6 +15,8 @@ import { CharacterData } from "@/components/prompts/CharacterForm";
 import { cleanScriptMarkings, countWords } from "@/lib/scriptUtils";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
+import { HistoryDialog } from "@/components/scene-prompts/HistoryDialog";
+import { ViewPromptDialog } from "@/components/scene-prompts/ViewPromptDialog";
 import { cn } from "@/lib/utils";
 
 const PromptsParaCenas = () => {
@@ -22,6 +24,8 @@ const PromptsParaCenas = () => {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showViewDialog, setShowViewDialog] = useState(false);
+  const [selectedPrompt, setSelectedPrompt] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [script, setScript] = useState("");
   const [generationMode, setGenerationMode] = useState("auto");
@@ -52,6 +56,33 @@ const PromptsParaCenas = () => {
     } catch (error: any) {
       console.error('Erro ao carregar histórico:', error);
     }
+  };
+
+  const handleViewPrompt = (item: any) => {
+    setSelectedPrompt(item);
+    setShowViewDialog(true);
+  };
+
+  const handleDeletePrompt = async (id: string) => {
+    const { error } = await supabase
+      .from('scene_prompts')
+      .delete()
+      .eq('id', id);
+    
+    if (error) {
+      toast({
+        title: "Erro ao excluir",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    await loadHistory();
+    toast({
+      title: "✅ Excluído com sucesso",
+      description: "O prompt foi removido do histórico.",
+    });
   };
 
   const handleGeneratePrompts = async () => {
@@ -313,17 +344,6 @@ const PromptsParaCenas = () => {
     }
   };
 
-  const handleDeletePrompt = async (id: string) => {
-    try {
-      const { error } = await supabase.from('scene_prompts').delete().eq('id', id);
-      if (error) throw error;
-      await loadHistory();
-      toast({ title: "Prompt excluído com sucesso" });
-    } catch (error: any) {
-      toast({ title: "Erro ao excluir", description: error.message, variant: "destructive" });
-    }
-  };
-
   const handleImportLastScript = async () => {
     setIsImporting(true);
     try {
@@ -426,38 +446,30 @@ const PromptsParaCenas = () => {
             ]}
           />
         </div>
-        <Button variant="outline" onClick={() => setShowHistory(!showHistory)}>
-          <History className="h-4 w-4 mr-2" />
-          {showHistory ? 'Ocultar' : 'Ver'} Histórico
+        <Button 
+          variant="outline" 
+          onClick={() => setShowHistory(true)}
+          className="gap-2"
+        >
+          <History className="h-4 w-4" />
+          Histórico ({history.length})
         </Button>
       </div>
 
-      {showHistory && (
-        <Card className="p-6">
-          <h2 className="text-2xl font-bold mb-4">Histórico de Prompts</h2>
-          <div className="space-y-4">
-            {history.map((item) => (
-              <Card key={item.id} className="p-4">
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(item.created_at).toLocaleString('pt-BR')}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setGeneratedPrompts(item.prompts)}>
-                      Ver
-                    </Button>
-                    <Button size="sm" variant="destructive" onClick={() => handleDeletePrompt(item.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </Card>
-      )}
+      {/* History and View Dialogs */}
+      <HistoryDialog
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        history={history}
+        onRefresh={loadHistory}
+        onView={handleViewPrompt}
+      />
+
+      <ViewPromptDialog
+        open={showViewDialog}
+        onOpenChange={setShowViewDialog}
+        item={selectedPrompt}
+      />
 
       <Card className="p-6 shadow-medium">
         <div className="space-y-6">
