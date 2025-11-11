@@ -1,6 +1,9 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,6 +38,27 @@ serve(async (req) => {
     
     const script = sanitizeString(body.script);
     const aiModel = body.aiModel;
+
+    // Get user ID for Vertex AI
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | undefined;
+    if (authHeader) {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id;
+      } catch (e) {
+        console.log('No authenticated user');
+      }
+    }
+
+    // Map AI model to provider
+    const { provider, model } = mapModelToProvider(aiModel);
+    console.log(`🔄 [detect-characters] Mapped ${aiModel} → provider: ${provider}, model: ${model}`);
 
     const prompt = `Analyze this script and identify ALL main characters.
 
@@ -80,7 +104,7 @@ RESPOND NOW with ONLY the JSON array, no additional text:`;
     let apiKey = '';
     let requestBody: any = {};
 
-    if (aiModel.startsWith('claude')) {
+    if (provider === 'claude') {
       apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
       apiUrl = 'https://api.anthropic.com/v1/messages';
       const modelMap: Record<string, string> = {
@@ -89,7 +113,7 @@ RESPOND NOW with ONLY the JSON array, no additional text:`;
         'claude-sonnet-3.7': 'claude-3-7-sonnet-20250219',
         'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
       };
-      const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
+      const finalModel = modelMap[model] || model;
       const maxTokens = getMaxTokensForModel(finalModel);
       console.log(`📦 [detect-characters] Usando ${maxTokens} max_tokens para ${finalModel}`);
       
@@ -98,26 +122,95 @@ RESPOND NOW with ONLY the JSON array, no additional text:`;
         max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }]
       };
-    } else if (aiModel.startsWith('gemini')) {
-      apiKey = Deno.env.get('GEMINI_API_KEY') || '';
-      const modelMap: Record<string, string> = {
-        'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-      };
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`;
-      requestBody = {
-        contents: [{ parts: [{ text: prompt }] }]
-      };
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (provider === 'gemini' || provider === 'vertex-ai') {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? ''
+      );
+
+      if (!userId) {
+        throw new Error('User not authenticated');
+      }
+
+      const apiProvider = provider === 'vertex-ai' ? 'vertex-ai' : 'gemini';
+      const { data: keyData, error: keyError } = await supabase
+        .from('user_api_keys')
+        .select('api_key_encrypted, vertex_config')
+        .eq('user_id', userId)
+        .eq('api_provider', apiProvider)
+        .eq('is_active', true)
+        .order('priority', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (keyError || !keyData) {
+        throw new Error(`No ${apiProvider.toUpperCase()} key configured`);
+      }
+
+      const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+        p_encrypted: keyData.api_key_encrypted,
+        p_user_id: userId,
+      });
+
+      if (decErr || !decrypted) {
+        throw new Error(`Failed to decrypt ${apiProvider.toUpperCase()} key`);
+      }
+
+      apiKey = decrypted as string;
+
+      let keyInfo: any = { key: apiKey };
+      if (provider === 'vertex-ai' && keyData.vertex_config) {
+        keyInfo = {
+          key: apiKey,
+          provider: 'vertex-ai',
+          vertexConfig: keyData.vertex_config
+        };
+      }
+
+      const { url, headers, body } = await buildGeminiOrVertexRequest(
+        keyInfo,
+        model,
+        prompt,
+        false
+      );
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.text();
+        console.error('API Error:', errorData);
+        throw new Error(`API Error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      let charactersText = data.candidates[0].content.parts[0].text;
+
+      // Try to parse JSON
+      let characters = [];
+      try {
+        const jsonText = charactersText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        characters = JSON.parse(jsonText);
+      } catch (e) {
+        console.error('Failed to parse characters JSON, returning empty array:', e);
+        characters = [];
+      }
+
+      return new Response(JSON.stringify({ characters }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } else if (provider === 'openai') {
       apiKey = Deno.env.get('OPENAI_API_KEY') || '';
       apiUrl = 'https://api.openai.com/v1/chat/completions';
-      const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
-      const maxTokens = getMaxTokensForModel(aiModel);
-      console.log(`📦 [detect-characters] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel}`);
+      const isReasoningModel = model.startsWith('gpt-5') || model.startsWith('o3-') || model.startsWith('o4-');
+      const maxTokens = getMaxTokensForModel(model);
+      console.log(`📦 [detect-characters] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${model}`);
       
       requestBody = {
-        model: aiModel,
+        model: model,
         messages: [{ role: 'user', content: prompt }],
         ...(isReasoningModel 
           ? { max_completion_tokens: maxTokens }
@@ -127,17 +220,17 @@ RESPOND NOW with ONLY the JSON array, no additional text:`;
     }
 
     if (!apiKey) {
-      throw new Error(`API key não configurada para ${aiModel}`);
+      throw new Error(`API key não configurada para ${provider}`);
     }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
     };
 
-    if (aiModel.startsWith('claude')) {
+    if (provider === 'claude') {
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = '2023-06-01';
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (provider === 'openai') {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
@@ -156,11 +249,9 @@ RESPOND NOW with ONLY the JSON array, no additional text:`;
     const data = await response.json();
     let charactersText = '';
 
-    if (aiModel.startsWith('claude')) {
+    if (provider === 'claude') {
       charactersText = data.content[0].text;
-    } else if (aiModel.startsWith('gemini')) {
-      charactersText = data.candidates[0].content.parts[0].text;
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (provider === 'openai') {
       charactersText = data.choices[0].message.content;
     }
 

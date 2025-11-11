@@ -1,6 +1,9 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -40,6 +43,23 @@ serve(async (req) => {
     const includeCTA = body.includeCTA;
 
     console.log('🎯 [optimize-description] Modelo selecionado:', aiModel);
+
+    // Get user ID for Vertex AI
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | undefined;
+    if (authHeader) {
+      const supabase = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        userId = user?.id;
+      } catch (e) {
+        console.log('No authenticated user');
+      }
+    }
 
     const languageMap: Record<string, string> = {
       'pt-BR': 'Português (Brasil)',
@@ -84,7 +104,7 @@ Formato JSON:
   ]
 }`;
 
-    const resultText = await callAI(prompt, aiModel);
+    const resultText = await callAI(prompt, aiModel, userId);
     const start = resultText.indexOf('{');
     const end = resultText.lastIndexOf('}');
     if (start === -1 || end === -1 || end < start) {
@@ -111,8 +131,11 @@ Formato JSON:
   }
 });
 
-async function callAI(prompt: string, model: string): Promise<string> {
-  if (model.startsWith('claude')) {
+async function callAI(prompt: string, aiModel: string, userId?: string): Promise<string> {
+  const { provider, model } = mapModelToProvider(aiModel);
+  console.log(`🔄 [optimize-description] Mapped ${aiModel} → provider: ${provider}, model: ${model}`);
+
+  if (provider === 'claude') {
     console.log('🔑 [optimize-description] Buscando API key ANTHROPIC_API_KEY');
     const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
     
@@ -129,7 +152,7 @@ async function callAI(prompt: string, model: string): Promise<string> {
       'claude-sonnet-3.7': 'claude-3-7-sonnet-20250219',
       'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
     };
-    const finalModel = modelMap[model] || 'claude-sonnet-4-5';
+    const finalModel = modelMap[model] || model;
     console.log('📦 [optimize-description] Modelo da API:', finalModel);
 
     console.log('🚀 [optimize-description] Enviando requisição para Anthropic API');
@@ -158,24 +181,63 @@ async function callAI(prompt: string, model: string): Promise<string> {
     const data = await response.json();
     console.log('✅ [optimize-description] Resposta recebida com sucesso');
     return data.content[0].text;
-  } else if (model.startsWith('gemini')) {
-    const apiKey = Deno.env.get('GEMINI_API_KEY');
-    const modelMap: Record<string, string> = {
-      'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-      'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-      'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-    };
-
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[model] || 'gemini-2.0-flash-exp'}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
+  } else if (provider === 'gemini' || provider === 'vertex-ai') {
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? ''
     );
+
+    if (!userId) {
+      throw new Error('User not authenticated');
+    }
+
+    const apiProvider = provider === 'vertex-ai' ? 'vertex-ai' : 'gemini';
+    const { data: keyData, error: keyError } = await supabase
+      .from('user_api_keys')
+      .select('api_key_encrypted, vertex_config')
+      .eq('user_id', userId)
+      .eq('api_provider', apiProvider)
+      .eq('is_active', true)
+      .order('priority', { ascending: true })
+      .limit(1)
+      .single();
+
+    if (keyError || !keyData) {
+      throw new Error(`No ${apiProvider.toUpperCase()} key configured`);
+    }
+
+    const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+      p_encrypted: keyData.api_key_encrypted,
+      p_user_id: userId,
+    });
+
+    if (decErr || !decrypted) {
+      throw new Error(`Failed to decrypt ${apiProvider.toUpperCase()} key`);
+    }
+
+    const apiKey = decrypted as string;
+
+    let keyInfo: any = { key: apiKey };
+    if (provider === 'vertex-ai' && keyData.vertex_config) {
+      keyInfo = {
+        key: apiKey,
+        provider: 'vertex-ai',
+        vertexConfig: keyData.vertex_config
+      };
+    }
+
+    const { url, headers, body } = await buildGeminiOrVertexRequest(
+      keyInfo,
+      model,
+      prompt,
+      false
+    );
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
 
     const data = await response.json();
     return data.candidates[0].content.parts[0].text;
