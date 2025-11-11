@@ -146,6 +146,18 @@ const CriadorConteudo = () => {
       });
       return;
     }
+    
+    // Get session token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({
+        title: "Erro de autenticação",
+        description: "Faça login para gerar roteiros",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     setIsLoading(true);
     setIsStreaming(true);
     setAnalysis(null);
@@ -161,7 +173,7 @@ const CriadorConteudo = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
           niche,

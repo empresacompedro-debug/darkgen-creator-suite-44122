@@ -26,9 +26,21 @@ serve(async (req) => {
 
     let userId: string | undefined;
     try {
-      const { data: { user } } = await supabaseClient.auth.getUser(token);
-      userId = user?.id;
+      console.log(`[create-script] 🔐 Auth header present: ${!!authHeader}`);
+      console.log(`[create-script] 🔐 Token extracted: ${token?.substring(0, 20)}...`);
+      
+      if (token && token !== Deno.env.get("SUPABASE_ANON_KEY")) {
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+        if (userError) {
+          console.log(`[create-script] ⚠️ Error getting user:`, userError);
+        }
+        userId = user?.id;
+        console.log(`[create-script] 👤 User ID found: ${userId || 'undefined'}`);
+      } else {
+        console.log(`[create-script] 🔑 Token is anon key, skipping user auth`);
+      }
     } catch (error) {
+      console.log('[create-script] ⚠️ Auth error:', error);
       console.log('No authenticated user, using global API keys only');
     }
 
