@@ -2,7 +2,8 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateString, validateArray, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
-import { getApiKey, updateApiKeyUsage } from '../_shared/get-api-key.ts';
+import { getApiKey, getApiKeyWithHierarchicalFallback, updateApiKeyUsage } from '../_shared/get-api-key.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -138,27 +139,28 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
                 stream: true
               };
             } else if (modelToUse.startsWith('gemini')) {
-              console.log(`🔑 [translate-script] Buscando API key Gemini para ${targetLang}`);
+              console.log(`🔑 [translate-script] Buscando API key Gemini com fallback hierárquico para ${targetLang}`);
               
-              const keyData = await getApiKey(userId, 'gemini', supabase);
+              const keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabase);
               if (!keyData) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para Gemini' })}\n\n`));
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para Gemini/Vertex AI' })}\n\n`));
                 continue;
               }
               
-              apiKey = keyData.key;
-              // Usar gemini-2.0-flash-exp para todos os modelos Gemini 2.5
-              const modelMap: Record<string, string> = {
-                'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-                'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-                'gemini-2.5-flash-lite': 'gemini-2.0-flash-exp'
-              };
-              const finalGeminiModel = modelMap[modelToUse] || 'gemini-2.0-flash-exp';
-              console.log(`🤖 [translate-script] Modelo Gemini mapeado: ${modelToUse} → ${finalGeminiModel}`);
-              apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalGeminiModel}:streamGenerateContent?key=${apiKey}&alt=sse`;
-              requestBody = {
-                contents: [{ parts: [{ text: prompt }] }]
-              };
+              const { url: apiUrl, headers: apiHeaders, body: apiBody } = await buildGeminiOrVertexRequest(
+                keyData,
+                modelToUse.replace('gemini-', 'gemini-2.0-flash-exp'),
+                prompt,
+                true // streaming
+              );
+              
+              console.log(`🤖 [translate-script] Usando ${keyData.provider} para ${targetLang}`);
+              
+              const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: apiHeaders,
+                body: JSON.stringify(apiBody)
+              });
             } else if (modelToUse.startsWith('gpt')) {
               console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
               

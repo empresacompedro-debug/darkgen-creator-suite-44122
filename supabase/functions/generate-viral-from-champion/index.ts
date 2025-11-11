@@ -1,7 +1,8 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey } from '../_shared/get-api-key.ts';
+import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -159,38 +160,29 @@ CRÍTICO:
       const data = await response.json();
       aiResponse = data.content[0].text;
 
-    // 2. Gemini (API Key do Usuário)
+    // 2. Gemini (API Key do Usuário) com Fallback Hierárquico para Vertex AI
     } else if (aiModel.startsWith('gemini')) {
-      console.log('🔍 Buscando API Key do Gemini para o usuário...');
-      const geminiKeyInfo = await getApiKey(userId, 'gemini', supabaseClient);
+      console.log('🔍 Buscando API Key do Gemini com fallback hierárquico...');
+      const keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
       
-      if (!geminiKeyInfo) {
-        throw new Error('❌ API Key do Gemini não configurada. Configure em Configurações → API Keys.');
+      if (!keyData) {
+        throw new Error('❌ API Key do Gemini/Vertex AI não configurada. Configure em Configurações → API Keys.');
       }
       
-      const GEMINI_API_KEY = geminiKeyInfo.key;
-      console.log(`✅ Usando API Key do Gemini (ID: ${geminiKeyInfo.keyId})`);
+      console.log(`✅ Usando ${keyData.provider} (ID: ${keyData.keyId})`);
 
-      const modelMap: Record<string, string> = {
-        'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-      };
-
-      const finalModel = modelMap[aiModel] || 'gemini-2.0-flash-exp';
-      const maxTokens = getMaxTokensForModel(finalModel);
-      console.log(`📦 [generate-viral-from-champion] Usando ${maxTokens} tokens para ${finalModel} (Gemini ignora max_tokens explícito)`);
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${finalModel}:generateContent?key=${GEMINI_API_KEY}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
+      const { url, headers, body } = await buildGeminiOrVertexRequest(
+        keyData,
+        aiModel.replace('gemini-', 'gemini-2.0-flash-exp'), // Map to actual model
+        prompt,
+        false
       );
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+      });
 
       if (!response.ok) {
         const errorData = await response.text();

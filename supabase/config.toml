@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.test-vertex-api]
 verify_jwt = false
+
+[functions.get-usage-stats]
+verify_jwt = true

@@ -244,6 +244,26 @@ export async function executeWithKeyRotation<T>(
       // ✅ REMOVIDO: Double update de last_used_at
       // O update já foi feito atomicamente no get_and_update_next_key()
       // Manter updateApiKeyUsage aqui causava 2 updates desnecessários
+
+      // 📊 Log API usage for cost tracking (only for Gemini/Vertex AI)
+      if (userId && (currentProvider === 'gemini' || currentProvider === 'vertex-ai')) {
+        const functionName = Deno.env.get('FUNCTION_NAME') || 'unknown';
+        try {
+          const supabaseAdmin = createClient(
+            Deno.env.get('SUPABASE_URL')!,
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+          );
+          await supabaseAdmin.from('api_usage_logs').insert({
+            user_id: userId,
+            provider: currentProvider,
+            function_name: functionName
+          });
+          console.log(`📊 [executeWithKeyRotation] Logged ${currentProvider} usage for ${functionName}`);
+        } catch (logError) {
+          console.error('⚠️ [executeWithKeyRotation] Failed to log usage:', logError);
+          // Don't fail the request if logging fails
+        }
+      }
       
       console.log(`✅ [Execute] Request successful with key ${currentKeyNumber || 'global'}/${totalKeys || '?'}`);
       return result;

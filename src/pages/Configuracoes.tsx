@@ -56,10 +56,13 @@ const Configuracoes = () => {
   const [validatingKeys, setValidatingKeys] = useState(false);
   const [validationProgress, setValidationProgress] = useState({ current: 0, total: 0 });
   const [revalidating, setRevalidating] = useState(false);
+  const [usageStats, setUsageStats] = useState<any>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
 
   useEffect(() => {
     loadUserData();
     checkAdminRole();
+    loadUsageStats();
   }, []);
 
   const checkAdminRole = async () => {
@@ -611,7 +614,12 @@ const Configuracoes = () => {
 
       if (error) throw error;
 
-      const result = data.results;
+      // Fallback para estrutura de resposta compatível
+      const result = data.results || {
+        reactivated: data.reactivated || 0,
+        stillExhausted: data.stillExhausted || 0,
+        errors: data.errors || 0
+      };
       
       toast({
         title: "Re-validação concluída!",
@@ -632,6 +640,21 @@ const Configuracoes = () => {
       });
     } finally {
       setRevalidating(false);
+    }
+  };
+
+  const loadUsageStats = async () => {
+    try {
+      setLoadingStats(true);
+      const { data, error } = await supabase.functions.invoke('get-usage-stats');
+      
+      if (error) throw error;
+      
+      setUsageStats(data.stats);
+    } catch (error: any) {
+      console.error('Error loading usage stats:', error);
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -872,6 +895,115 @@ const Configuracoes = () => {
                 APIs como YouTube/Gemini resetam quotas diariamente, permitindo reutilização automática.
               </AlertDescription>
             </Alert>
+          </div>
+        </div>
+      </Card>
+
+      {/* Dashboard de Custos - Gemini vs Vertex AI */}
+      <Card className="p-6 border-green-500/30 bg-gradient-to-br from-green-50/50 to-background dark:from-green-950/20">
+        <div className="flex items-start gap-4">
+          <div className="rounded-full bg-green-500/20 p-3">
+            <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold mb-2">📊 Uso de API - Últimas 24h</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Sistema hierárquico: prioriza Gemini gratuito, escalona para Vertex AI pago quando necessário.
+            </p>
+            
+            {loadingStats ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : usageStats ? (
+              <>
+                <div className="mb-4">
+                  <Badge 
+                    variant={usageStats.gemini.activeKeys > 0 ? 'default' : 'destructive'}
+                    className="text-sm px-3 py-1"
+                  >
+                    {usageStats.gemini.activeKeys > 0 
+                      ? '🆓 Usando Gemini Gratuito' 
+                      : '💰 Usando Vertex AI Pago'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                  <div className="bg-background/80 rounded-lg p-4 border">
+                    <p className="text-xs text-muted-foreground mb-1">Requisições Gemini (Gratuito)</p>
+                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">{usageStats.gemini.requests}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {usageStats.gemini.activeKeys} chave(s) ativa(s)
+                    </p>
+                  </div>
+                  
+                  <div className="bg-background/80 rounded-lg p-4 border">
+                    <p className="text-xs text-muted-foreground mb-1">Requisições Vertex AI (Pago)</p>
+                    <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">{usageStats.vertexAi.requests}</p>
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                      ${Number(usageStats.vertexAi.estimatedCost).toFixed(4)} gasto
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-4 border border-green-200 dark:border-green-800">
+                  <p className="text-sm font-medium text-green-800 dark:text-green-300">
+                    💰 Economia: ${Number(usageStats.savingsEstimate).toFixed(4)}
+                  </p>
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+                    {usageStats.gemini.requests} requisições gratuitas ao invés de pagas
+                  </p>
+                </div>
+
+                {(usageStats.gemini.requests > 0 || usageStats.vertexAi.requests > 0) && (
+                  <div className="mt-4">
+                    <p className="text-xs text-muted-foreground mb-2">Distribuição de Requisições</p>
+                    <div className="flex gap-1 h-12 rounded overflow-hidden border">
+                      {usageStats.gemini.requests > 0 && (
+                        <div 
+                          className="bg-green-500 flex items-center justify-center text-white text-xs font-medium hover:bg-green-600 transition-colors"
+                          style={{ 
+                            width: `${(usageStats.gemini.requests / (usageStats.gemini.requests + usageStats.vertexAi.requests)) * 100}%` 
+                          }}
+                          title={`Gemini: ${usageStats.gemini.requests} requisições`}
+                        >
+                          {usageStats.gemini.requests}
+                        </div>
+                      )}
+                      {usageStats.vertexAi.requests > 0 && (
+                        <div 
+                          className="bg-orange-500 flex items-center justify-center text-white text-xs font-medium hover:bg-orange-600 transition-colors"
+                          style={{ 
+                            width: `${(usageStats.vertexAi.requests / (usageStats.gemini.requests + usageStats.vertexAi.requests)) * 100}%` 
+                          }}
+                          title={`Vertex AI: ${usageStats.vertexAi.requests} requisições`}
+                        >
+                          {usageStats.vertexAi.requests}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <Button 
+                  onClick={loadUsageStats}
+                  variant="outline"
+                  size="sm"
+                  className="mt-4 w-full sm:w-auto"
+                >
+                  🔄 Atualizar Estatísticas
+                </Button>
+              </>
+            ) : (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-sm">
+                  Nenhum dado de uso disponível ainda. Use as ferramentas para gerar estatísticas.
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         </div>
       </Card>

@@ -2,7 +2,8 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { validateString, validateUrl, validateOrThrow, ValidationException } from '../_shared/validation.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { getApiKey } from '../_shared/get-api-key.ts';
+import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -269,51 +270,41 @@ async function callAI(prompt: string, model: string, userId: string | undefined,
     console.log('✅ [optimize-video] Resposta recebida com sucesso');
     return data.content[0].text;
   } else if (model.startsWith('gemini')) {
-    console.log('🔑 [optimize-video] Buscando API key do Gemini...');
+    console.log('🔑 [optimize-video] Buscando API key do Gemini com fallback hierárquico...');
     
-    // Tenta buscar do banco de dados do usuário
-    let apiKey: string | null = null;
+    let keyData = null;
     if (userId) {
-      const userKeyData = await getApiKey(userId, 'gemini', supabaseClient);
-      if (userKeyData) {
-        apiKey = userKeyData.key;
-        console.log('✅ [optimize-video] Usando chave do usuário do banco de dados');
+      keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+    }
+    
+    if (!keyData) {
+      const globalKey = Deno.env.get('GEMINI_API_KEY');
+      if (globalKey) {
+        keyData = { key: globalKey, provider: 'gemini', keyId: 'global' };
+        console.log('✅ [optimize-video] Usando chave global Gemini');
       }
     }
     
-    // Se não encontrar no banco, usa o secret do ambiente
-    if (!apiKey) {
-      apiKey = Deno.env.get('GEMINI_API_KEY') || null;
-      if (apiKey) {
-        console.log('✅ [optimize-video] Usando chave do secret do Supabase');
-      }
-    }
-    
-    if (!apiKey) {
+    if (!keyData) {
       console.error('❌ [optimize-video] Nenhuma API key encontrada para Gemini');
       throw new Error('API key não configurada para Gemini. Por favor, adicione uma chave nas Configurações.');
     }
-    console.log('✅ [optimize-video] Gemini API key encontrada');
-    
-    const modelMap: Record<string, string> = {
-      'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-      'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-      'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-    };
-    const finalModel = modelMap[model] || 'gemini-2.0-flash-exp';
-    console.log('📦 [optimize-video] Modelo da API:', finalModel);
 
-    console.log('🚀 [optimize-video] Enviando requisição para Gemini API');
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${finalModel}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
+    console.log(`✅ [optimize-video] Usando ${keyData.provider}`);
+    
+    const { url, headers, body } = await buildGeminiOrVertexRequest(
+      keyData,
+      model.replace('gemini-', 'gemini-2.0-flash-exp'), // Map model
+      prompt,
+      false
     );
+
+    console.log('🚀 [optimize-video] Enviando requisição para', keyData.provider);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
 
     console.log('📨 [optimize-video] Status da resposta:', response.status);
     

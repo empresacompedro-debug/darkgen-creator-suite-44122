@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_usage_logs: {
+        Row: {
+          function_name: string
+          id: string
+          provider: string
+          timestamp: string
+          user_id: string
+        }
+        Insert: {
+          function_name: string
+          id?: string
+          provider: string
+          timestamp?: string
+          user_id: string
+        }
+        Update: {
+          function_name?: string
+          id?: string
+          provider?: string
+          timestamp?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: string
@@ -1497,6 +1521,7 @@ export type Database = {
           total_keys: number
         }[]
       }
+      get_usage_stats_24h: { Args: { p_user_id: string }; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

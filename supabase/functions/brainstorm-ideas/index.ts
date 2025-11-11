@@ -2,7 +2,8 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
-import { getApiKey } from '../_shared/get-api-key.ts';
+import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -333,18 +334,22 @@ Responda de forma clara, organizada e valiosa.`;
         stream: true
       };
     } else if (aiModel.startsWith('gemini')) {
-      console.log(`🔑 [brainstorm-ideas] Buscando API key Google`);
-      const keyData = await getApiKey(userId || undefined, 'gemini', supabase);
-      if (!keyData) throw new Error('API key não configurada para Gemini');
-      const { key: apiKeyValue } = keyData;
-      apiKey = apiKeyValue;
+      console.log(`🔑 [brainstorm-ideas] Buscando API key Google com fallback hierárquico`);
+      const keyData = await getApiKeyWithHierarchicalFallback(userId || undefined, 'gemini', supabase);
+      if (!keyData) throw new Error('API key não configurada para Gemini/Vertex AI');
       
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
-      console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
+      const { url, headers, body } = await buildGeminiOrVertexRequest(keyData, aiModel, fullPrompt, false);
+      apiUrl = url;
+      requestBody = body;
       
-      requestBody = {
-        contents: [{ parts: [{ text: fullPrompt }] }]
-      };
+      // Remover Content-Type dos headers retornados e adicionar os específicos
+      Object.keys(headers).forEach(key => {
+        if (key.toLowerCase() !== 'content-type') {
+          (headers as any)[key] = headers[key];
+        }
+      });
+      
+      console.log(`🤖 [brainstorm-ideas] Usando ${keyData.provider} - modelo: ${aiModel}`);
     } else if (aiModel.startsWith('gpt')) {
       console.log(`🔑 [brainstorm-ideas] Buscando API key OpenAI`);
       const keyData = await getApiKey(userId || undefined, 'openai', supabase);
