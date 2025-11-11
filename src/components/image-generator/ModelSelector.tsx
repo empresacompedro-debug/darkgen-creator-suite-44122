@@ -12,24 +12,12 @@ interface ModelConfig {
   speed: "fast" | "medium" | "slow";
   quality: "standard" | "high" | "ultra";
   maxSize: string;
-  provider: "pollinations" | "huggingface" | "google";
+  provider: "pollinations" | "huggingface";
   preview?: string;
 }
 
 const MODELS: ModelConfig[] = [
-  // Google AI Models (Nano Banana)
-  {
-    id: "nano-banana",
-    name: "Nano Banana 🍌",
-    description: "Gemini 2.5 Flash Image - Geração rápida com IA do Google",
-    category: "universal",
-    speed: "fast",
-    quality: "ultra",
-    maxSize: "1024x1024",
-    provider: "google"
-  },
-  
-  // Pollinations Models (Recomendados - Todos funcionam)
+  // Pollinations Models (Gratuito e ilimitado)
   {
     id: "pollinations",
     name: "Flux",
@@ -136,9 +124,8 @@ const MODELS: ModelConfig[] = [
 
 const CATEGORIES = [
   { id: "all", name: "Todos", icon: ImageIcon },
-  { id: "google", name: "Google AI", icon: Sparkles },
-  { id: "pollinations", name: "Pollinations", icon: Sparkles },
-  { id: "huggingface", name: "HuggingFace", icon: ImageIcon },
+  { id: "pollinations", name: "Pollinations 🆓", icon: Sparkles },
+  { id: "huggingface", name: "HuggingFace 🔑", icon: ImageIcon },
   { id: "universal", name: "Universal", icon: Sparkles },
   { id: "photorealistic", name: "Fotorrealista", icon: Sparkles },
   { id: "anime", name: "Anime", icon: Sparkles },
@@ -149,7 +136,7 @@ const CATEGORIES = [
 interface ModelSelectorProps {
   value: string;
   onChange: (value: string) => void;
-  provider: "pollinations" | "huggingface" | "google";
+  provider: "pollinations" | "huggingface";
 }
 
 export function ModelSelector({ value, onChange, provider }: ModelSelectorProps) {
@@ -179,7 +166,7 @@ export function ModelSelector({ value, onChange, provider }: ModelSelectorProps)
   return (
     <div className="space-y-4">
       <Tabs defaultValue="all" className="w-full">
-        <TabsList className="grid w-full grid-cols-8 mb-4">
+        <TabsList className="grid w-full grid-cols-7 mb-4">
           {CATEGORIES.map((cat) => (
             <TabsTrigger key={cat.id} value={cat.id} className="text-xs">
               <cat.icon className="h-3 w-3 mr-1" />
@@ -194,7 +181,6 @@ export function ModelSelector({ value, onChange, provider }: ModelSelectorProps)
               {availableModels
                 .filter(model => {
                   if (category.id === "all") return true;
-                  if (category.id === "google") return model.provider === "google";
                   if (category.id === "pollinations") return model.provider === "pollinations";
                   if (category.id === "huggingface") return model.provider === "huggingface";
                   return model.category === category.id;

@@ -52,8 +52,8 @@ const GeradorImagens = () => {
   const [promptStyle, setPromptStyle] = useState("cinematic");
   const [numImages, setNumImages] = useState(1);
   const [quality, setQuality] = useState("standard");
-  const [provider, setProvider] = useState<"pollinations" | "huggingface" | "google">("pollinations");
-  const [imageModel, setImageModel] = useState<"pollinations" | "pollinations-flux-realism" | "pollinations-flux-anime" | "pollinations-flux-3d" | "pollinations-turbo" | "nano-banana">("pollinations");
+  const [provider, setProvider] = useState<"pollinations" | "huggingface">("pollinations");
+  const [imageModel, setImageModel] = useState<"pollinations" | "pollinations-flux-realism" | "pollinations-flux-anime" | "pollinations-flux-3d" | "pollinations-turbo">("pollinations");
   const [huggingfaceModel, setHuggingfaceModel] = useState("sdxl");
   
   const { toast } = useToast();
@@ -351,13 +351,8 @@ const GeradorImagens = () => {
             console.log(`Gerando imagem ${imgIndex + 1}/${numImages} da cena ${sceneIndex + 1}/${scenes.length}`);
 
             // Determinar provider correto baseado no modelo
-            let actualProvider = provider;
-            let actualModel = provider === "pollinations" ? imageModel : huggingfaceModel;
-            
-            if (imageModel === "nano-banana") {
-              actualProvider = "google";
-              actualModel = "nano-banana";
-            }
+            const actualProvider = provider;
+            const actualModel = provider === "pollinations" ? imageModel : huggingfaceModel;
 
             const { data, error } = await supabase.functions.invoke('generate-images', {
               body: {
@@ -543,8 +538,7 @@ const GeradorImagens = () => {
                 <Select value={provider} onValueChange={(value: any) => {
                   setProvider(value);
                   // Auto-select appropriate model when changing provider
-                  if (value === "google") setImageModel("nano-banana");
-                  else if (value === "pollinations") setImageModel("pollinations");
+                  if (value === "pollinations") setImageModel("pollinations");
                   else if (value === "huggingface") setHuggingfaceModel("flux-schnell");
                 }}>
                   <SelectTrigger id="provider">
@@ -557,9 +551,7 @@ const GeradorImagens = () => {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {provider === "google"
-                    ? "🍌 Google Gemini 2.5 Flash Image - Requer chave API"
-                    : provider === "pollinations" 
+                  {provider === "pollinations" 
                     ? "✨ 100% gratuito, sem configuração" 
                     : "🚀 Modelos premium - Requer API key"}
                 </p>
@@ -573,14 +565,11 @@ const GeradorImagens = () => {
                   onClick={() => setShowModelSelector(true)}
                 >
                   <ImageIcon className="h-4 w-4 mr-2" />
-                  {provider === "google"
-                    ? "Nano Banana 🍌"
-                    : provider === "pollinations" 
+                  {provider === "pollinations" 
                     ? imageModel === "pollinations" ? "Flux (Padrão)" 
                     : imageModel === "pollinations-flux-realism" ? "Flux Realism"
                     : imageModel === "pollinations-flux-anime" ? "Flux Anime"
                     : imageModel === "pollinations-flux-3d" ? "Flux 3D"
-                    : imageModel === "nano-banana" ? "Nano Banana 🍌"
                     : "Turbo (Rápido)"
                     : MODELS.find(m => m.id === huggingfaceModel)?.name || huggingfaceModel
                   }
