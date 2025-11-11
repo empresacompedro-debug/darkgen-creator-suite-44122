@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { HfInference } from 'https://esm.sh/@huggingface/inference@2.7.0';
+
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,28 +126,38 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
 
   try {
-    // Usar versão atualizada da biblioteca (2.7.0+) que usa automaticamente o novo endpoint
-    const hf = new HfInference(token);
-    
-    const image = await hf.textToImage({
-      model: modelId,
-      inputs: prompt,
+    // Chamar o novo endpoint Router diretamente (hf-inference)
+    const apiUrl = `https://router.huggingface.co/hf-inference/models/${modelId}`;
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'image/png'
+      },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          width: 1280,
+          height: 720
+        }
+      })
     });
 
-    // Converter blob para base64 usando função segura
-    const arrayBuffer = await image.arrayBuffer();
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
     const base64 = arrayBufferToBase64(arrayBuffer);
     
-    console.log(`✅ [HuggingFace] Image generated successfully`);
+    console.log(`✅ [HuggingFace] Image generated successfully via router`);
     return `data:image/png;base64,${base64}`;
     
   } catch (error: any) {
-    console.error(`❌ [HuggingFace] Error details:`, {
-      message: error.message,
-      status: error.status,
-      response: error.response,
-      stack: error.stack
-    });
-    throw new Error(`HuggingFace error: ${error.message}`);
+    console.error(`❌ [HuggingFace] Error via router:`, error?.message || error);
+    throw new Error(`HuggingFace error: ${error?.message || 'Unknown error'}`);
   }
 }
