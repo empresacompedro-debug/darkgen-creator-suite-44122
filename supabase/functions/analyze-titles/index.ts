@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -56,29 +58,68 @@ serve(async (req) => {
 
     console.log('User ID:', userId);
 
-    // Get API key based on model
+    // Map AI model to provider
+    const { provider, model } = mapModelToProvider(aiModel);
+    console.log(`🔄 [analyze-titles] Mapped ${aiModel} → provider: ${provider}, model: ${model}`);
+
+    // Get API key based on provider
     let apiKey: string | undefined;
     let apiUrl: string;
     let requestBody: any;
 
-    if (aiModel.includes('claude')) {
+    if (provider === 'claude') {
       apiKey = Deno.env.get('ANTHROPIC_API_KEY');
       apiUrl = 'https://api.anthropic.com/v1/messages';
       
       if (!apiKey) {
         throw new Error('ANTHROPIC_API_KEY não configurada');
       }
-    } else if (aiModel.includes('gemini')) {
-      apiKey = Deno.env.get('GEMINI_API_KEY');
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${apiKey}`;
-      
-      if (!apiKey) {
-        throw new Error('GEMINI_API_KEY não configurada');
+    } else if (provider === 'gemini' || provider === 'vertex-ai') {
+      // Para Gemini ou Vertex AI, precisamos buscar a chave do usuário
+      if (!userId) {
+        throw new Error('Usuário não autenticado');
       }
-    } else if (aiModel.includes('gpt')) {
+
+      // Buscar chave Gemini ou Vertex AI do usuário
+      const apiProvider = provider === 'vertex-ai' ? 'vertex-ai' : 'gemini';
+      const { data: keyData, error: keyError } = await supabase
+        .from('user_api_keys')
+        .select('api_key_encrypted, vertex_config')
+        .eq('user_id', userId)
+        .eq('api_provider', apiProvider)
+        .eq('is_active', true)
+        .order('priority', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (keyError || !keyData) {
+        throw new Error(`Nenhuma chave ${apiProvider.toUpperCase()} configurada para este usuário`);
+      }
+
+      // Descriptografar chave
+      const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+        p_encrypted: keyData.api_key_encrypted,
+        p_user_id: userId,
+      });
+
+      if (decErr || !decrypted) {
+        throw new Error(`Falha ao descriptografar chave ${apiProvider.toUpperCase()}`);
+      }
+
+      apiKey = decrypted as string;
+
+      // Se for Vertex AI, preparar configuração especial
+      if (provider === 'vertex-ai' && keyData.vertex_config) {
+        // A URL será construída pelo buildGeminiOrVertexRequest
+        apiUrl = ''; // Será sobrescrito
+      } else {
+        // API Gemini gratuita
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      }
+    } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
     } else {
-      throw new Error(`Modelo não suportado: ${aiModel}`);
+      throw new Error(`Provider não suportado: ${provider}`);
     }
 
     // Build comprehensive markdown prompt
@@ -173,8 +214,8 @@ IMPORTANTE:
 
     let analysis: AnalysisResult = { markdownReport: '' };
 
-    // Make API request based on model
-    if (aiModel.includes('claude')) {
+    // Make API request based on provider
+    if (provider === 'claude') {
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -183,7 +224,7 @@ IMPORTANTE:
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
-          model: aiModel,
+          model: model,
           max_tokens: 8192,
           messages: [
             {
@@ -206,30 +247,47 @@ IMPORTANTE:
       const markdownReport = data.content[0].text;
       analysis = { markdownReport };
       
-    } else if (aiModel.includes('gemini')) {
-      const response = await fetch(apiUrl, {
+    } else if (provider === 'gemini' || provider === 'vertex-ai') {
+      // Buscar configuração completa para Vertex AI
+      let keyInfo: any = { key: apiKey };
+      
+      if (provider === 'vertex-ai' && userId) {
+        const { data: vertexKey } = await supabase
+          .from('user_api_keys')
+          .select('vertex_config')
+          .eq('user_id', userId)
+          .eq('api_provider', 'vertex-ai')
+          .eq('is_active', true)
+          .single();
+        
+        if (vertexKey?.vertex_config) {
+          keyInfo = {
+            key: apiKey,
+            provider: 'vertex-ai',
+            vertexConfig: vertexKey.vertex_config
+          };
+        }
+      }
+
+      // Construir requisição usando helper
+      const { url, headers, body } = await buildGeminiOrVertexRequest(
+        keyInfo,
+        model,
+        prompt,
+        false
+      );
+
+      const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [{
-              text: prompt,
-            }],
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 65536,
-          },
-        }),
+        headers,
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Gemini API error:', errorText);
-        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+        const providerName = provider === 'vertex-ai' ? 'Vertex AI' : 'Gemini';
+        console.error(`${providerName} API error:`, errorText);
+        throw new Error(`${providerName} API error: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
@@ -268,14 +326,18 @@ IMPORTANTE:
               .replace('Repetir para Campeões 3, 4 e 5 até completar 50 títulos', 'Repetir para Campeões 3, 4 e 5 até completar 20 títulos')
               .replace('## ⭐ **10 TÍTULOS FINAIS COM MAIOR POTENCIAL**', '## ⭐ **5 TÍTULOS FINAIS COM MAIOR POTENCIAL**');
 
-          console.log('Retrying Gemini with compact prompt');
-          const retryResp = await fetch(apiUrl, {
+          console.log('Retrying with compact prompt');
+          const { url: retryUrl, headers: retryHeaders, body: retryBody } = await buildGeminiOrVertexRequest(
+            keyInfo,
+            model,
+            compactPrompt,
+            false
+          );
+          
+          const retryResp = await fetch(retryUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: compactPrompt }] }],
-              generationConfig: { temperature: 0.7, maxOutputTokens: 65536 },
-            }),
+            headers: retryHeaders,
+            body: JSON.stringify(retryBody),
           });
 
           if (retryResp.ok) {
@@ -306,7 +368,7 @@ IMPORTANTE:
       } else {
         analysis = { markdownReport };
       }
-    } else if (aiModel.includes('gpt')) {
+    } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       
       // OpenAI request with user-specific key retrieval and simple rotation
@@ -365,7 +427,7 @@ IMPORTANTE:
             'Authorization': `Bearer ${openaiKeyToUse}`,
           },
           body: JSON.stringify({
-            model: aiModel,
+            model: model,
             messages: [
               {
                 role: 'user',
