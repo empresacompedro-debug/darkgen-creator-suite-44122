@@ -103,7 +103,7 @@ serve(async (req) => {
         }
         
         // Forçar uso do Gemini gratuito
-        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
       } else {
 
         // Descriptografar chave
