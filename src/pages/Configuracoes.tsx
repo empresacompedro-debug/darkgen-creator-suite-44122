@@ -259,7 +259,7 @@ const Configuracoes = () => {
             user_id: user.id,
             api_provider: provider,
             api_key_encrypted: encryptedKey,
-            is_active: true,
+            is_active: k.is_active !== undefined ? k.is_active : true,
             priority: k.priority || 1,
             updated_at: new Date().toISOString(),
           };
@@ -386,12 +386,78 @@ const Configuracoes = () => {
     }
   };
 
+  const validateKeyFormat = (provider: string, key: string): { valid: boolean; message: string } => {
+    const trimmedKey = key.trim();
+    
+    // Não validar placeholders
+    if (trimmedKey === '••••••••••••••••') {
+      return { valid: false, message: 'Placeholder não pode ser validado' };
+    }
+    
+    switch (provider) {
+      case 'gemini':
+      case 'youtube':
+        if (!trimmedKey.startsWith('AIzaSy')) {
+          return { valid: false, message: 'Chave deve começar com "AIzaSy"' };
+        }
+        if (trimmedKey.length < 35 || trimmedKey.length > 45) {
+          return { valid: false, message: 'Tamanho inválido (esperado ~39 caracteres)' };
+        }
+        break;
+      
+      case 'openai':
+        if (!trimmedKey.startsWith('sk-') && !trimmedKey.startsWith('sk-proj-')) {
+          return { valid: false, message: 'Chave OpenAI deve começar com "sk-" ou "sk-proj-"' };
+        }
+        if (trimmedKey.length < 20) {
+          return { valid: false, message: 'Chave muito curta' };
+        }
+        break;
+      
+      case 'claude':
+        if (!trimmedKey.startsWith('sk-ant-')) {
+          return { valid: false, message: 'Chave Claude deve começar com "sk-ant-"' };
+        }
+        if (trimmedKey.length < 30) {
+          return { valid: false, message: 'Chave muito curta' };
+        }
+        break;
+      
+      case 'huggingface':
+        if (!trimmedKey.startsWith('hf_')) {
+          return { valid: false, message: 'Chave HuggingFace deve começar com "hf_"' };
+        }
+        break;
+      
+      case 'vertex-ai':
+        // Vertex AI usa JSON, validar na função específica
+        return { valid: true, message: '' };
+      
+      default:
+        return { valid: true, message: '' };
+    }
+    
+    return { valid: true, message: '' };
+  };
+
   const validateKey = async (provider: string, keyId: string, keyValue: string) => {
     if (keyValue === '••••••••••••••••') {
       toast({ title: "Aviso", description: "Não é possível validar chaves já salvas", variant: "default" });
       return;
     }
 
+    // 1️⃣ Validar formato primeiro
+    const formatCheck = validateKeyFormat(provider, keyValue);
+    if (!formatCheck.valid) {
+      toast({ 
+        title: "❌ Formato inválido", 
+        description: formatCheck.message, 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    // 2️⃣ Validar com API
     setValidatingKey(keyId);
     try {
       const { data, error } = await supabase.functions.invoke('test-api-key', {
@@ -504,6 +570,19 @@ const Configuracoes = () => {
       lines.map(async (key, index) => {
         setValidationProgress({ current: index + 1, total: lines.length });
         
+        // 1️⃣ VALIDAÇÃO DE FORMATO PRIMEIRO (instantâneo)
+        const formatCheck = validateKeyFormat(bulkImportProvider, key);
+        if (!formatCheck.valid) {
+          return {
+            key,
+            valid: false,
+            message: formatCheck.message,
+            errorType: 'INVALID_KEY',
+            keyPrefix: key.substring(0, 12)
+          };
+        }
+        
+        // 2️⃣ VALIDAÇÃO COM API (apenas se formato for válido)
         try {
           const { data, error } = await supabase.functions.invoke('test-api-key', {
             body: { provider: bulkImportProvider, apiKey: key }
@@ -584,15 +663,24 @@ const Configuracoes = () => {
     setBulkImportText("");
     setBulkImportOpen(false);
 
-    // Auto-save prompt se houver chaves válidas
-    if (validCount > 0) {
+    // Auto-save prompt se houver chaves válidas ou com quota esgotada
+    if (validCount > 0 || quotaCount > 0) {
       const shouldSave = window.confirm(
-        `Deseja salvar as ${validCount} chave(s) válida(s) agora? (Recomendado)\n\n` +
-        `As chaves inválidas/quota esgotada serão marcadas como inativas.`
+        `📊 Resultados da validação:\n\n` +
+        `✅ ${validCount} chave(s) VÁLIDA(S) (serão ativadas)\n` +
+        `⚠️ ${quotaCount} chave(s) COM QUOTA ESGOTADA (serão desativadas)\n` +
+        `❌ ${invalidCount} chave(s) INVÁLIDA(S) (serão descartadas)\n\n` +
+        `Deseja salvar as ${validCount} chave(s) válida(s) e ${quotaCount} quota(s) esgotada(s) agora?`
       );
 
       if (shouldSave) {
-        await handleSave(bulkImportProvider, [...currentKeys, ...newKeys]);
+        // Filtrar apenas chaves válidas ou com quota esgotada (descartar inválidas)
+        const keysToSave = newKeys.filter(k => 
+          validationResults.find(r => r.key === k.key && 
+            (r.valid || r.errorType === 'QUOTA_EXCEEDED')
+          )
+        );
+        await handleSave(bulkImportProvider, [...currentKeys, ...keysToSave]);
       }
     }
   };
@@ -736,7 +824,22 @@ const Configuracoes = () => {
               <Input
                 type="text"
                 value={key.key}
-                onChange={(e) => updateKey(provider, key.id, 'key', e.target.value)}
+                onChange={(e) => {
+                  const newValue = e.target.value;
+                  updateKey(provider, key.id, 'key', newValue);
+                  
+                  // Validação visual em tempo real
+                  if (newValue.length > 10 && newValue !== '••••••••••••••••') {
+                    const formatCheck = validateKeyFormat(provider, newValue);
+                    if (!formatCheck.valid) {
+                      e.target.classList.add('border-destructive');
+                    } else {
+                      e.target.classList.remove('border-destructive');
+                    }
+                  } else {
+                    e.target.classList.remove('border-destructive');
+                  }
+                }}
                 placeholder={key.key === '••••••••••••••••' ? 'Chave salva (oculta por segurança)' : 'Cole sua API Key aqui'}
                 disabled={key.key === '••••••••••••••••'}
                 className="flex-1"
