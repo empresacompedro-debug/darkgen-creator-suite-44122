@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { HfInference } from 'https://esm.sh/@huggingface/inference@2.3.2';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -108,32 +109,26 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   };
 
   const modelId = modelMap[model] || modelMap['flux-schnell'];
-  const apiUrl = `https://api-inference.huggingface.co/models/${modelId}`;
-
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
 
-  const response = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
+  try {
+    // Usar a biblioteca oficial do HuggingFace
+    const hf = new HfInference(token);
+    
+    const image = await hf.textToImage({
       inputs: prompt,
-      parameters: {
-        width: 1280,
-        height: 720,
-        num_inference_steps: model === 'flux-schnell' ? 4 : 30
-      }
-    })
-  });
+      model: modelId,
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
+    // Converter blob para base64
+    const arrayBuffer = await image.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    
+    console.log(`✅ [HuggingFace] Image generated successfully`);
+    return `data:image/png;base64,${base64}`;
+    
+  } catch (error: any) {
+    console.error(`❌ [HuggingFace] Error:`, error.message);
+    throw new Error(`HuggingFace error: ${error.message}`);
   }
-
-  const arrayBuffer = await response.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-  return `data:image/png;base64,${base64}`;
 }
