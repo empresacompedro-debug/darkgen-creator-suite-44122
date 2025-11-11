@@ -360,7 +360,8 @@ Responda de forma clara, organizada e valiosa.`;
       console.log(`🔑 [brainstorm-ideas] Buscando API key Anthropic`);
       const keyData = await getApiKey(userId || undefined, 'claude', supabase);
       if (!keyData) throw new Error('API key não configurada para Claude');
-      apiKey = keyData.key;
+      const { key: apiKeyValue } = keyData;
+      apiKey = apiKeyValue;
       
       apiUrl = 'https://api.anthropic.com/v1/messages';
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
@@ -375,7 +376,8 @@ Responda de forma clara, organizada e valiosa.`;
       console.log(`🔑 [brainstorm-ideas] Buscando API key Google`);
       const keyData = await getApiKey(userId || undefined, 'gemini', supabase);
       if (!keyData) throw new Error('API key não configurada para Gemini');
-      apiKey = keyData.key;
+      const { key: apiKeyValue } = keyData;
+      apiKey = apiKeyValue;
       
       apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
@@ -387,7 +389,8 @@ Responda de forma clara, organizada e valiosa.`;
       console.log(`🔑 [brainstorm-ideas] Buscando API key OpenAI`);
       const keyData = await getApiKey(userId || undefined, 'openai', supabase);
       if (!keyData) throw new Error('API key não configurada para OpenAI');
-      apiKey = keyData.key;
+      const { key: apiKeyValue } = keyData;
+      apiKey = apiKeyValue;
       
       apiUrl = 'https://api.openai.com/v1/chat/completions';
       console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
