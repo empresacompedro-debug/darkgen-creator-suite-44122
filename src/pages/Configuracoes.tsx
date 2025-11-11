@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Shield, Upload, CheckCheck } from "lucide-react";
+import { Settings, Key, Save, Trash2, CheckCircle, Loader2, AlertCircle, Plus, X, Shield, Upload, CheckCheck, Info } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -534,17 +534,47 @@ const Configuracoes = () => {
       }
 
       toast({
-        title: "✅ JSON carregado",
-        description: `Service Account: ${json.client_email}. Salvando...`
+        title: "⏳ Validando credenciais...",
+        description: `Testando Service Account: ${json.client_email}`
       });
 
-      // 🔥 AUTO-SALVAR NO BANCO
-      // Aguardar o state ser atualizado
+      // 🔥 VALIDAR CREDENCIAIS ANTES DE SALVAR
+      const { data: validationData, error: validationError } = await supabase.functions.invoke('test-vertex-api', {
+        body: { 
+          serviceAccountJson: text,
+          projectId: json.project_id,
+          location: vertexKeys.find(k => k.id === keyId)?.location || 'us-central1'
+        }
+      });
+
+      if (validationError || !validationData?.valid) {
+        toast({
+          title: "❌ Credenciais inválidas",
+          description: validationData?.message || validationError?.message || "Erro ao validar credenciais",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // ✅ Credenciais válidas, atualizar state
+      updateKey('vertex-ai', keyId, 'key', text);
+      
+      if (json.project_id) {
+        updateKey('vertex-ai', keyId, 'projectId', json.project_id);
+      }
+
+      toast({
+        title: "✅ Credenciais validadas!",
+        description: `Projeto: ${json.project_id}. Salvando...`
+      });
+
+      // Auto-salvar no banco
       setTimeout(async () => {
         await handleSave('vertex-ai', vertexKeys);
         toast({
-          title: "✅ Credenciais Vertex AI salvas!",
-          description: "JSON criptografado e armazenado com segurança"
+          title: "✅ Vertex AI configurado com sucesso!",
+          description: "Credenciais criptografadas e armazenadas. Você já pode usar nos seletores.",
+          duration: 5000
         });
       }, 100);
       
@@ -1133,17 +1163,37 @@ const Configuracoes = () => {
       <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-orange-500/10 border-amber-500/30">
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="text-lg font-semibold">💰 Vertex AI (Google Cloud) - PAGO</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                Service Account com autenticação OAuth 2.0. <strong>Escalona automaticamente quando Gemini gratuito esgotar.</strong>
-              </p>
+            <div className="flex items-center gap-3">
+              <div>
+                <h3 className="text-lg font-semibold">💰 Vertex AI (Google Cloud) - PAGO</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Service Account com autenticação OAuth 2.0. <strong>Escalona automaticamente quando Gemini gratuito esgotar.</strong>
+                </p>
+              </div>
+              {vertexKeys.some(k => k.key && k.key !== '••••••••••••••••') && (
+                <Badge variant="default" className="bg-blue-600 ml-2">
+                  ✅ Vertex AI Configurado
+                </Badge>
+              )}
             </div>
             <Button size="sm" onClick={() => addKey('vertex-ai')}>
               <Plus className="h-4 w-4 mr-2" />
               Adicionar Credencial
             </Button>
           </div>
+
+          <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950/30">
+            <Info className="h-4 w-4 text-blue-600" />
+            <AlertDescription className="text-sm text-blue-800 dark:text-blue-300">
+              <strong>💡 Google Cloud Vertex AI</strong>
+              <ul className="list-disc list-inside mt-2 space-y-1 text-xs">
+                <li>Mesmos modelos Gemini, mas com <strong>cotas maiores</strong> e <strong>menor latência</strong></li>
+                <li>Requer conta Google Cloud e Service Account configurado</li>
+                <li>Cobrança baseada em uso (pay-as-you-go)</li>
+                <li>Após configurar aqui, aparecerá em <strong>todos os seletores de IA</strong> do sistema</li>
+              </ul>
+            </AlertDescription>
+          </Alert>
 
           {vertexKeys.length === 0 && (
             <div className="bg-background/50 rounded-lg p-4">

@@ -32,34 +32,58 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
       icon: <Sparkles className="h-3 w-3" />,
       maxVideos: 600
     },
-    // Modelos Gemini
+    
+    // 🔥 Modelos Vertex AI (Google Cloud)
+    { 
+      id: "vertex-gemini-2.5-pro", 
+      name: "Google Cloud Vertex - Gemini 2.5 Pro", 
+      provider: "Google Cloud",
+      description: "Vertex AI (pago) - Cotas maiores e menor latência - Requer Service Account",
+      requiresKey: true,
+      icon: <Sparkles className="h-3 w-3" />,
+      maxVideos: 1000,
+      badge: "Vertex AI"
+    },
+    { 
+      id: "vertex-gemini-2.5-flash", 
+      name: "Google Cloud Vertex - Gemini 2.5 Flash", 
+      provider: "Google Cloud",
+      description: "Vertex AI (pago) - Rápido e eficiente - Requer Service Account",
+      requiresKey: true,
+      icon: <Zap className="h-3 w-3" />,
+      maxVideos: 800,
+      badge: "Vertex AI"
+    },
+    
+    // Modelos Gemini (API Gratuita)
     { 
       id: "gemini-2.5-pro", 
-      name: "Gemini 2.5 Pro", 
+      name: "Gemini 2.5 Pro (API Gratuita)", 
       provider: "Google",
-      description: "Modelo avançado do Google - Requer API key",
+      description: "Modelo avançado do Google - Requer API key gratuita",
       requiresKey: true,
       icon: <Sparkles className="h-3 w-3" />,
       maxVideos: 800
     },
     { 
       id: "gemini-2.5-flash", 
-      name: "Gemini 2.5 Flash", 
+      name: "Gemini 2.5 Flash (API Gratuita)", 
       provider: "Google",
-      description: "Rápido e eficiente - Requer API key",
+      description: "Rápido e eficiente - Requer API key gratuita",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
       maxVideos: 600
     },
     { 
       id: "gemini-2.5-flash-lite", 
-      name: "Gemini 2.5 Flash Lite", 
+      name: "Gemini 2.5 Flash Lite (API Gratuita)", 
       provider: "Google",
-      description: "Ultra rápido e leve - Requer API key",
+      description: "Ultra rápido e leve - Requer API key gratuita",
       requiresKey: true,
       icon: <Zap className="h-3 w-3" />,
       maxVideos: 400
     },
+    
     // Modelos OpenAI
     { 
       id: "gpt-4o-mini", 
@@ -125,6 +149,9 @@ export function AIModelSelector({ value, onChange, label = "Modelo de IA" }: AIM
                 <div className="flex items-center gap-1">
                   {model.recommended && (
                     <Badge variant="secondary" className="text-xs">Padrão</Badge>
+                  )}
+                  {(model as any).badge === "Vertex AI" && (
+                    <Badge variant="default" className="text-xs bg-blue-600">Vertex AI</Badge>
                   )}
                   {model.requiresKey && (
                     <Badge variant="outline" className="text-xs">API Key</Badge>

@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
 import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -93,22 +94,12 @@ Responda de forma clara, organizada e valiosa.`;
 
       // Detectar apenas IAs selecionadas pelo usuário
       for (const modelId of selectedModels) {
-        let provider: 'anthropic' | 'google' | 'openai';
-        let providerKey: 'claude' | 'gemini' | 'openai';
+        const { provider: providerKey, model: actualModel } = mapModelToProvider(modelId);
         
-        if (modelId.startsWith('claude')) {
-          provider = 'anthropic';
-          providerKey = 'claude';
-        } else if (modelId.startsWith('gemini')) {
-          provider = 'google';
-          providerKey = 'gemini';
-        } else if (modelId.startsWith('gpt')) {
-          provider = 'openai';
-          providerKey = 'openai';
-        } else {
-          console.log(`Unknown model: ${modelId}`);
-          continue;
-        }
+        let provider: 'anthropic' | 'google' | 'openai';
+        if (providerKey === 'claude') provider = 'anthropic';
+        else if (providerKey === 'gemini' || providerKey === 'vertex-ai') provider = 'google';
+        else provider = 'openai';
 
         try {
           // Buscar chave via helper unificado (inclui fallback global e round-robin)
@@ -312,12 +303,15 @@ Responda de forma clara, organizada e valiosa.`;
     }
 
     // Modo single AI - System prompt conversacional
+    
+    // Usar helper para mapear modelo → provider
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
 
     let apiUrl = '';
     let apiKey = '';
     let requestBody: any = {};
 
-    if (aiModel.startsWith('claude')) {
+    if (providerKey === 'claude') {
       console.log(`🔑 [brainstorm-ideas] Buscando API key Anthropic`);
       const keyData = await getApiKey(userId || undefined, 'claude', supabase);
       if (!keyData) throw new Error('API key não configurada para Claude');
@@ -325,20 +319,22 @@ Responda de forma clara, organizada e valiosa.`;
       apiKey = apiKeyValue;
       
       apiUrl = 'https://api.anthropic.com/v1/messages';
-      console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
+      console.log(`🤖 [brainstorm-ideas] Usando modelo: ${actualModel}`);
       
       requestBody = {
-        model: aiModel,
+        model: actualModel,
         max_tokens: 8192,
         messages: [{ role: 'user', content: fullPrompt }],
         stream: true
       };
-    } else if (aiModel.startsWith('gemini')) {
-      console.log(`🔑 [brainstorm-ideas] Buscando API key Google com fallback hierárquico`);
-      const keyData = await getApiKeyWithHierarchicalFallback(userId || undefined, 'gemini', supabase);
+    } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
+      console.log(`🔑 [brainstorm-ideas] Buscando API key ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini com fallback hierárquico'}`);
+      const keyData = providerKey === 'vertex-ai' 
+        ? await getApiKey(userId || undefined, 'vertex-ai', supabase)
+        : await getApiKeyWithHierarchicalFallback(userId || undefined, 'gemini', supabase);
       if (!keyData) throw new Error('API key não configurada para Gemini/Vertex AI');
       
-      const { url, headers, body } = await buildGeminiOrVertexRequest(keyData, aiModel, fullPrompt, false);
+      const { url, headers, body } = await buildGeminiOrVertexRequest(keyData, actualModel, fullPrompt, false);
       apiUrl = url;
       requestBody = body;
       
@@ -349,8 +345,9 @@ Responda de forma clara, organizada e valiosa.`;
         }
       });
       
-      console.log(`🤖 [brainstorm-ideas] Usando ${keyData.provider} - modelo: ${aiModel}`);
-    } else if (aiModel.startsWith('gpt')) {
+      const usedProvider = 'provider' in keyData ? keyData.provider : providerKey;
+      console.log(`🤖 [brainstorm-ideas] Usando ${usedProvider} - modelo: ${actualModel}`);
+    } else if (providerKey === 'openai') {
       console.log(`🔑 [brainstorm-ideas] Buscando API key OpenAI`);
       const keyData = await getApiKey(userId || undefined, 'openai', supabase);
       if (!keyData) throw new Error('API key não configurada para OpenAI');
@@ -358,13 +355,13 @@ Responda de forma clara, organizada e valiosa.`;
       apiKey = apiKeyValue;
       
       apiUrl = 'https://api.openai.com/v1/chat/completions';
-      console.log(`🤖 [brainstorm-ideas] Usando modelo: ${aiModel}`);
+      console.log(`🤖 [brainstorm-ideas] Usando modelo: ${actualModel}`);
       
       // Detectar se é modelo reasoning ou gpt-4.1+
-      const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-') || aiModel.startsWith('gpt-4.1');
+      const isReasoningModel = actualModel.startsWith('gpt-5') || actualModel.startsWith('o3-') || actualModel.startsWith('o4-') || actualModel.startsWith('gpt-4.1');
       
       requestBody = {
-        model: aiModel,
+        model: actualModel,
         messages: [{ role: 'user', content: fullPrompt }],
         ...(isReasoningModel 
           ? { max_completion_tokens: 8192 }
@@ -373,7 +370,7 @@ Responda de forma clara, organizada e valiosa.`;
         stream: true
       };
       
-      console.log(`🎯 [brainstorm-single] ${aiModel} usando ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'}`);
+      console.log(`🎯 [brainstorm-single] ${actualModel} usando ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'}`);
     }
 
     if (!apiKey) {
@@ -424,7 +421,7 @@ Responda de forma clara, organizada e valiosa.`;
               let content = '';
 
               // Parse baseado no provider
-              if (aiModel.startsWith('claude')) {
+              if (providerKey === 'claude') {
                 if (line.startsWith('data: ')) {
                   const data = line.slice(6);
                   if (data === '[DONE]') continue;
@@ -437,7 +434,7 @@ Responda de forma clara, organizada e valiosa.`;
                     console.error('Error parsing Claude chunk:', e);
                   }
                 }
-              } else if (aiModel.startsWith('gemini')) {
+              } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
                 if (line.startsWith('data: ')) {
                   const data = line.slice(6);
                   try {
@@ -447,7 +444,7 @@ Responda de forma clara, organizada e valiosa.`;
                     console.error('Error parsing Gemini chunk:', e);
                   }
                 }
-              } else if (aiModel.startsWith('gpt')) {
+              } else if (providerKey === 'openai') {
                 if (line.startsWith('data: ')) {
                   const data = line.slice(6);
                   if (data === '[DONE]') continue;
