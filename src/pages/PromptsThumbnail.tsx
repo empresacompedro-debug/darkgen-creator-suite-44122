@@ -5,9 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ImageIcon, Loader2, Download, Trash2, History, Search as SearchIcon, X, Eye, BookOpen } from "lucide-react";
+import { ImageIcon, Loader2, Download, Trash2, History, X, Eye, BookOpen, Copy, Sparkles } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +16,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { UserManual } from "@/components/thumbnail-prompt/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
-import { ModelSelector } from "@/components/image-generator/ModelSelector";
 
 const PromptsThumbnail = () => {
   const { toast } = useToast();
@@ -37,25 +35,31 @@ const PromptsThumbnail = () => {
   const [aiModel, setAiModel] = useState("gemini-2.5-flash");
   const [generatedPrompt, setGeneratedPrompt] = useState("");
 
-  // Modeling states (Tab 3)
+  // NOVO: Estados para o sistema de 2 passos (Tab 3)
   const [competitorImages, setCompetitorImages] = useState<ExtractedThumbnail[]>([]);
   const [uploadedImages, setUploadedImages] = useState<File[]>([]);
+  const [selectedImage, setSelectedImage] = useState<any>(null);
   const [modelingLevel, setModelingLevel] = useState<'identical' | 'similar' | 'concept'>('similar');
-  const [includeText, setIncludeText] = useState(false);
   const [customInstructions, setCustomInstructions] = useState('');
-  const [modelingQuantity, setModelingQuantity] = useState(2);
-  const [provider, setProvider] = useState<"pollinations" | "huggingface">("pollinations");
-  const [imageModel, setImageModel] = useState("pollinations");
-  const [huggingfaceModel, setHuggingfaceModel] = useState("flux-schnell");
   const [selectedAIModel, setSelectedAIModel] = useState("gemini-2.5-flash");
-  const [showModelSelector, setShowModelSelector] = useState(false);
-  const [isModeling, setIsModeling] = useState(false);
-  const [modelingResults, setModelingResults] = useState<any>(null);
+  
+  // PASSO 1: Análise com streaming
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzedPrompt, setAnalyzedPrompt] = useState('');
+  const [analysisComplete, setAnalysisComplete] = useState(false);
+  
+  // PASSO 2: Geração
+  const [showGenerationDialog, setShowGenerationDialog] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<'huggingface' | 'pollinations'>('pollinations');
+  const [selectedModel, setSelectedModel] = useState('pollinations');
+  const [generationQuantity, setGenerationQuantity] = useState(2);
+  const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Resultados e histórico
+  const [modelingResults, setModelingResults] = useState<string[]>([]);
   const [modelingHistory, setModelingHistory] = useState<any[]>([]);
-  const [currentModelingIndex, setCurrentModelingIndex] = useState(0);
   const [previewItem, setPreviewItem] = useState<any | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [customText, setCustomText] = useState('');
   const [showManual, setShowManual] = useState(false);
 
   useEffect(() => {
@@ -119,6 +123,7 @@ const PromptsThumbnail = () => {
       toast({ title: 'Erro ao excluir tudo', description: e.message, variant: 'destructive' });
     }
   };
+
   const handleGeneratePrompt = async () => {
     if (!videoTitle.trim()) {
       toast({
@@ -194,7 +199,7 @@ const PromptsThumbnail = () => {
     if (!files || files.length === 0) return;
 
     const validFiles: File[] = [];
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = 5 * 1024 * 1024;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -243,159 +248,175 @@ const PromptsThumbnail = () => {
     });
   };
 
-  const handleModelThumbnails = async () => {
-    const totalImages = competitorImages.length + uploadedImages.length;
-    
-    if (totalImages === 0) {
+  // ========== PASSO 1: ANÁLISE COM STREAMING ==========
+  const handleAnalyzeImage = async () => {
+    if (!selectedImage) {
       toast({
         title: "Erro",
-        description: "Adicione imagens para modelar (extraídas do YouTube ou upload direto)",
+        description: "Selecione uma imagem para analisar",
         variant: "destructive",
       });
       return;
     }
 
-    setIsModeling(true);
-    setModelingResults(null);
-    setCurrentModelingIndex(0);
+    setIsAnalyzing(true);
+    setAnalyzedPrompt('');
+    setAnalysisComplete(false);
+    setModelingResults([]);
 
-    const allResults: any[] = [];
+    try {
+      let imageBase64 = '';
+      
+      if (selectedImage.type === 'youtube') {
+        imageBase64 = selectedImage.data.base64 || await urlToBase64(selectedImage.data.thumbnailUrl);
+      } else {
+        imageBase64 = await fileToBase64(selectedImage.data);
+      }
 
-    // Processar thumbnails extraídas do YouTube
-    for (let i = 0; i < competitorImages.length; i++) {
-      const thumbnail = competitorImages[i];
-      setCurrentModelingIndex(i + 1);
-
-      toast({
-        title: `Modelando ${i + 1}/${totalImages}`,
-        description: thumbnail.title.substring(0, 50),
+      console.log('🔍 [Frontend] Starting streaming analysis...');
+      
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-thumbnail-streaming`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          imageBase64,
+          modelingLevel,
+          aiModel: selectedAIModel,
+          customInstructions
+        })
       });
 
-      try {
-        const imageBase64 = thumbnail.base64 || await urlToBase64(thumbnail.thumbnailUrl);
-
-        const { data, error } = await supabase.functions.invoke('model-thumbnail', {
-          body: {
-            imageBase64,
-            modelingLevel,
-            customInstructions,
-            quantity: modelingQuantity,
-            imageGenerator: provider,
-            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
-            aiModel: selectedAIModel
-          }
-        });
-
-        if (error) throw error;
-
-        if (!data.success) {
-          throw new Error(data.error || 'Erro ao gerar imagens');
-        }
-
-        allResults.push({
-          original: { type: 'youtube', data: thumbnail },
-          generatedImages: data.generatedImages
-        });
-
-        // Salvar histórico
-        await supabase.from('thumbnail_modelings').insert({
-          original_image_url: imageBase64.substring(0, 500),
-          modeling_level: modelingLevel,
-          include_text: includeText,
-          custom_instructions: customInstructions,
-          quantity: modelingQuantity,
-          image_generator: provider,
-          generated_images: data.generatedImages,
-          ai_analysis: data.aiAnalysis || null,
-          ai_model: data.aiModel || null,
-          user_id: user?.id
-        });
-
-      } catch (error: any) {
-        console.error(`Error modeling thumbnail ${i + 1}:`, error);
-        allResults.push({
-          original: { type: 'youtube', data: thumbnail },
-          error: error.message
-        });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Erro ao analisar imagem: ${response.status} - ${errorText}`);
       }
-    }
 
-    // Processar imagens carregadas
-    for (let i = 0; i < uploadedImages.length; i++) {
-      const file = uploadedImages[i];
-      const currentIndex = competitorImages.length + i + 1;
-      setCurrentModelingIndex(currentIndex);
+      // Ler streaming response
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim();
+            
+            if (dataStr === '[DONE]') {
+              setAnalysisComplete(true);
+              setIsAnalyzing(false);
+              toast({
+                title: '✅ Análise Concluída!',
+                description: 'Prompt gerado com sucesso. Clique em MODELAR para continuar.'
+              });
+              return;
+            }
+
+            try {
+              const data = JSON.parse(dataStr);
+              if (data.error) {
+                throw new Error(data.error);
+              }
+              if (data.text) {
+                setAnalyzedPrompt(prev => prev + data.text);
+              }
+            } catch (e) {
+              console.error('Error parsing chunk:', e);
+            }
+          }
+        }
+      }
+
+    } catch (error: any) {
+      console.error('❌ [Frontend] Analysis error:', error);
       toast({
-        title: `Modelando ${currentIndex}/${totalImages}`,
-        description: file.name.substring(0, 50),
+        title: 'Erro na Análise',
+        description: error.message,
+        variant: 'destructive'
       });
-
-      try {
-        const imageBase64 = await fileToBase64(file);
-
-        const { data, error } = await supabase.functions.invoke('model-thumbnail', {
-          body: {
-            imageBase64,
-            modelingLevel,
-            customInstructions,
-            quantity: modelingQuantity,
-            imageGenerator: provider,
-            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
-            aiModel: selectedAIModel
-          }
-        });
-
-        if (error) throw error;
-
-        if (!data.success) {
-          throw new Error(data.error || 'Erro ao gerar imagens');
-        }
-
-        allResults.push({
-          original: { type: 'upload', data: file, preview: imageBase64 },
-          generatedImages: data.generatedImages
-        });
-
-        // Salvar histórico
-        await supabase.from('thumbnail_modelings').insert({
-          original_image_url: imageBase64.substring(0, 500),
-          modeling_level: modelingLevel,
-          include_text: includeText,
-          custom_instructions: customInstructions,
-          quantity: modelingQuantity,
-          image_generator: provider,
-          generated_images: data.generatedImages,
-          ai_analysis: data.aiAnalysis || null,
-          ai_model: data.aiModel || null,
-          user_id: user?.id
-        });
-
-      } catch (error: any) {
-        console.error(`Error modeling uploaded image ${i + 1}:`, error);
-        allResults.push({
-          original: { type: 'upload', data: file },
-          error: error.message
-        });
-      }
+    } finally {
+      setIsAnalyzing(false);
     }
-
-    setModelingResults({ results: allResults });
-    setIsModeling(false);
-    await loadModelingHistory();
-
-    const successCount = allResults.filter(r => !r.error).length;
-    toast({
-      title: "✅ Modelagem Concluída!",
-      description: `${successCount}/${totalImages} thumbnail(s) modelada(s) com sucesso`,
-      duration: 5000,
-    });
   };
 
-  const downloadModeledImage = (imageUrl: string, index: number, originalName: string) => {
+  // ========== PASSO 2: GERAR VARIAÇÕES ==========
+  const handleGenerateVariations = async () => {
+    setIsGenerating(true);
+
+    try {
+      console.log('🎨 [Frontend] Starting generation...');
+      
+      const { data, error } = await supabase.functions.invoke('generate-thumbnail-variations', {
+        body: {
+          prompt: analyzedPrompt,
+          provider: selectedProvider,
+          model: selectedModel,
+          quantity: generationQuantity
+        }
+      });
+
+      if (error) throw error;
+      if (!data.success) throw new Error(data.error || 'Erro ao gerar imagens');
+
+      console.log(`✅ [Frontend] Generated ${data.generatedImages.length} images`);
+
+      // Obter preview da imagem original
+      let originalImageUrl = '';
+      if (selectedImage.type === 'youtube') {
+        originalImageUrl = selectedImage.data.base64 || await urlToBase64(selectedImage.data.thumbnailUrl);
+      } else {
+        originalImageUrl = await fileToBase64(selectedImage.data);
+      }
+
+      // Salvar no histórico
+      await supabase.from('thumbnail_modelings').insert({
+        original_image_url: originalImageUrl.substring(0, 500),
+        modeling_level: modelingLevel,
+        custom_instructions: customInstructions,
+        quantity: generationQuantity,
+        image_generator: selectedProvider,
+        generated_images: data.generatedImages,
+        ai_analysis: analyzedPrompt.substring(0, 5000),
+        ai_model: selectedAIModel,
+        user_id: user?.id
+      });
+
+      setModelingResults(data.generatedImages);
+      setShowGenerationDialog(false);
+      await loadModelingHistory();
+
+      toast({
+        title: '🎉 Variações Geradas!',
+        description: `${data.generatedImages.length} imagens criadas com sucesso`
+      });
+
+    } catch (error: any) {
+      console.error('❌ [Frontend] Generation error:', error);
+      toast({
+        title: 'Erro na Geração',
+        description: error.message,
+        variant: 'destructive'
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const downloadModeledImage = (imageUrl: string, index: number) => {
     const a = document.createElement('a');
     a.href = imageUrl;
-    a.download = `thumbnail-modelada-${originalName.substring(0, 20)}-${index + 1}.png`;
+    a.download = `thumbnail-modelada-${index + 1}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -405,22 +426,9 @@ const PromptsThumbnail = () => {
     });
   };
 
-  const getOriginalImagePreview = (result: any) => {
-    if (result.original.type === 'youtube') {
-      return result.original.data.thumbnailUrl;
-    } else if (result.original.type === 'upload') {
-      return result.original.preview || URL.createObjectURL(result.original.data);
-    }
-    return '';
-  };
-
-  const getOriginalImageTitle = (result: any) => {
-    if (result.original.type === 'youtube') {
-      return result.original.data.title;
-    } else if (result.original.type === 'upload') {
-      return result.original.data.name;
-    }
-    return 'Imagem';
+  const copyPromptToClipboard = () => {
+    navigator.clipboard.writeText(analyzedPrompt);
+    toast({ title: '📋 Prompt copiado!' });
   };
 
   return (
@@ -435,7 +443,7 @@ const PromptsThumbnail = () => {
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => setShowManual(true)}>
             <BookOpen className="h-4 w-4 mr-2" />
-            Ver Manual Completo
+            Ver Manual
           </Button>
           <Button variant="outline" onClick={() => setShowHistory(!showHistory)}>
             <History className="h-4 w-4 mr-2" />
@@ -478,8 +486,8 @@ const PromptsThumbnail = () => {
       <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)}>
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="prompts">Geração de Prompts</TabsTrigger>
-          <TabsTrigger value="extraction">🔍 Extração de Thumbnails</TabsTrigger>
-          <TabsTrigger value="modeling">🎨 Modelagem</TabsTrigger>
+          <TabsTrigger value="extraction">🔍 Extração</TabsTrigger>
+          <TabsTrigger value="modeling">🎨 Modelagem 2.0</TabsTrigger>
         </TabsList>
 
         {/* TAB 1: Geração de Prompts */}
@@ -491,508 +499,591 @@ const PromptsThumbnail = () => {
                 <Input id="videoTitle" placeholder="Digite o título do vídeo" value={videoTitle} onChange={(e) => setVideoTitle(e.target.value)} />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="platform">Plataforma de Imagem</Label>
+                  <Label>Plataforma</Label>
                   <Select value={platform} onValueChange={setPlatform}>
-                    <SelectTrigger id="platform"><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="midjourney">Midjourney</SelectItem>
-                      <SelectItem value="dall-e-3">Dall-E 3</SelectItem>
+                      <SelectItem value="dalle">DALL-E</SelectItem>
                       <SelectItem value="stable-diffusion">Stable Diffusion</SelectItem>
-                      <SelectItem value="leonardo">Leonardo.AI</SelectItem>
-                      <SelectItem value="ideogram">Ideogram</SelectItem>
-                      <SelectItem value="image-fx">Image-FX</SelectItem>
-                      <SelectItem value="whisk">Whisk</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="language">Idioma do Texto na Imagem</Label>
+                  <Label>Idioma</Label>
                   <Select value={language} onValueChange={setLanguage}>
-                    <SelectTrigger id="language"><SelectValue /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pt">Português BR</SelectItem>
-                      <SelectItem value="en">English US</SelectItem>
-                      <SelectItem value="es">Español</SelectItem>
-                      <SelectItem value="fr">Français</SelectItem>
-                      <SelectItem value="de">Deutsch</SelectItem>
-                      <SelectItem value="it">Italiano</SelectItem>
-                      <SelectItem value="ja">日本語</SelectItem>
-                      <SelectItem value="ko">한국어</SelectItem>
-                      <SelectItem value="ro">Română</SelectItem>
-                      <SelectItem value="pl">Polski</SelectItem>
+                      <SelectItem value="pt">Português</SelectItem>
+                      <SelectItem value="en">Inglês</SelectItem>
+                      <SelectItem value="es">Espanhol</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Checkbox id="includePhrase" checked={includePhrase} onCheckedChange={(checked) => setIncludePhrase(!!checked)} />
-                <label htmlFor="includePhrase" className="text-sm">Incluir frase na imagem</label>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="ai-model">Modelo de IA</Label>
+                <Label>Modelo de IA</Label>
                 <Select value={aiModel} onValueChange={setAiModel}>
-                  <SelectTrigger id="ai-model"><SelectValue /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
-                    <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
-                    <SelectItem value="claude-sonnet-3.5">Claude Sonnet 3.5</SelectItem>
-                    <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
                     <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                    <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</SelectItem>
+                    <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                    <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
                     <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                    <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <Button onClick={handleGeneratePrompt} disabled={isLoading} className="w-full">
-                {isLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Gerando Prompt...</> : <><ImageIcon className="h-4 w-4 mr-2" />Gerar Prompts</>}
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Gerando...
+                  </>
+                ) : (
+                  '✨ Gerar Prompt'
+                )}
               </Button>
+
+              {generatedPrompt && (
+                <div className="space-y-2">
+                  <Label>Prompt Gerado</Label>
+                  <Textarea value={generatedPrompt} readOnly className="min-h-[200px]" />
+                </div>
+              )}
             </div>
           </Card>
-
-          {generatedPrompt && (
-            <Card className="p-6 shadow-soft mt-6">
-              <h2 className="text-2xl font-bold text-foreground mb-4">Prompt Gerado</h2>
-              <Textarea value={generatedPrompt} readOnly className="min-h-[200px] font-mono text-sm" />
-              <Button onClick={() => handleDownloadPrompt(generatedPrompt, videoTitle)} className="mt-4">
-                <Download className="h-4 w-4 mr-2" />Baixar Prompt
-              </Button>
-            </Card>
-          )}
         </TabsContent>
 
-        {/* TAB 2: Extração de Thumbnails */}
+        {/* TAB 2: Extração */}
         <TabsContent value="extraction">
           <Card className="p-6">
             <ThumbnailExtractor onSendToModeling={handleSendToModeling} />
           </Card>
         </TabsContent>
 
-        {/* TAB 3: Modelagem */}
+        {/* TAB 3: MODELAGEM 2.0 COM STREAMING */}
         <TabsContent value="modeling">
-          <Card className="p-6">
+          <SubscriptionGuard featureName="Modelagem de Thumbnails">
             <div className="space-y-6">
-              {/* Upload de Imagens */}
-              <div className="space-y-3">
-                <Label>Adicionar Thumbnails para Modelar</Label>
-                <div
-                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-all ${
-                    uploadedImages.length > 0 || competitorImages.length > 0
-                      ? 'border-primary bg-primary/5'
-                      : 'border-muted-foreground/25 hover:border-primary hover:bg-accent/5'
-                  }`}
-                  onClick={() => document.getElementById('upload-images')?.click()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    handleImageUpload(e.dataTransfer.files);
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                >
-                  <ImageIcon className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                  <p className="text-lg font-medium">Arraste imagens ou clique para selecionar</p>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    JPG, PNG ou WebP (máx 5MB por imagem)
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Você pode adicionar múltiplas imagens de uma vez
-                  </p>
-                </div>
-                <input
-                  id="upload-images"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handleImageUpload(e.target.files)}
-                />
-              </div>
+              {/* PASSO 1: Análise com Streaming */}
+              <Card className="p-6">
+                <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  Passo 1: Analisar Imagem
+                </h3>
 
-              {/* Imagens Carregadas via Upload */}
-              {uploadedImages.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Imagens Carregadas ({uploadedImages.length})</Label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setUploadedImages([])}
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Limpar Todas
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {uploadedImages.map((file, idx) => (
-                      <div key={idx} className="relative group">
-                        <img
-                          src={URL.createObjectURL(file)}
-                          alt={file.name}
-                          className="w-full rounded-lg shadow-md"
-                        />
-                        <Button
-                          variant="destructive"
-                          size="icon"
-                          className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeUploadedImage(idx);
-                          }}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                          {file.name}
-                        </p>
+                {/* Upload ou thumbnails extraídas */}
+                <div className="mb-6">
+                  <Label className="mb-2 block">Fonte da Imagem</Label>
+                  
+                  {competitorImages.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {competitorImages.length} thumbnail(s) extraída(s)
+                      </p>
+                      <div className="grid grid-cols-4 gap-4">
+                        {competitorImages.map((thumb, idx) => (
+                          <div 
+                            key={idx}
+                            onClick={() => setSelectedImage({ type: 'youtube', data: thumb })}
+                            className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                              selectedImage?.type === 'youtube' && selectedImage.data === thumb
+                                ? 'border-primary ring-2 ring-primary'
+                                : 'border-border hover:border-primary/50'
+                            }`}
+                          >
+                            <img src={thumb.thumbnailUrl} alt={thumb.title} className="w-full h-24 object-cover" />
+                            <p className="text-xs p-2 truncate">{thumb.title}</p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                    </div>
+                  )}
 
-              {/* Thumbnails Extraídas do YouTube */}
-              {competitorImages.length > 0 && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>Thumbnails do YouTube ({competitorImages.length})</Label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setCompetitorImages([])}
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Limpar
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {competitorImages.map((img, idx) => (
-                      <div key={idx} className="relative group">
-                        <img
-                          src={img.thumbnailUrl}
-                          alt={img.title}
-                          className="w-full rounded-lg shadow-md"
-                        />
-                        <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
-                          {img.title}
-                        </p>
+                  {uploadedImages.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm text-muted-foreground mb-2">
+                        {uploadedImages.length} imagem(ns) carregada(s)
+                      </p>
+                      <div className="grid grid-cols-4 gap-4">
+                        {uploadedImages.map((file, idx) => (
+                          <div key={idx} className="relative">
+                            <div
+                              onClick={() => setSelectedImage({ type: 'upload', data: file })}
+                              className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                                selectedImage?.type === 'upload' && selectedImage.data === file
+                                  ? 'border-primary ring-2 ring-primary'
+                                  : 'border-border hover:border-primary/50'
+                              }`}
+                            >
+                              <img 
+                                src={URL.createObjectURL(file)} 
+                                alt={file.name}
+                                className="w-full h-24 object-cover"
+                              />
+                              <p className="text-xs p-2 truncate">{file.name}</p>
+                            </div>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="absolute top-1 right-1 h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeUploadedImage(idx);
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-4">
+                    <label className="flex-1">
+                      <Input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        multiple
+                        onChange={(e) => handleImageUpload(e.target.files)}
+                        className="cursor-pointer"
+                      />
+                    </label>
+                    {(competitorImages.length > 0 || uploadedImages.length > 0) && (
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setCompetitorImages([]);
+                          setUploadedImages([]);
+                          setSelectedImage(null);
+                        }}
+                      >
+                        Limpar
+                      </Button>
+                    )}
                   </div>
                 </div>
-              )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Nível de Modelagem</Label>
-                  <Select value={modelingLevel} onValueChange={(v: any) => setModelingLevel(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="identical">🎯 Idêntica - Cópia Exata</SelectItem>
-                      <SelectItem value="similar">🎨 Parecida - Mesma Essência</SelectItem>
-                      <SelectItem value="concept">💡 Conceito - Mesma Ideia</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {modelingLevel === 'identical' && 'Replica exatamente cores, layout e fontes'}
-                    {modelingLevel === 'similar' && 'Mantém o estilo mas varia detalhes'}
-                    {modelingLevel === 'concept' && 'Captura a ideia e recria de forma diferente'}
-                  </p>
+                {/* Configurações */}
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label>Nível de Modelagem</Label>
+                    <Select value={modelingLevel} onValueChange={(v: any) => setModelingLevel(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="identical">🎯 Idêntico (cópia fiel)</SelectItem>
+                        <SelectItem value="similar">🎨 Similar (mesmo estilo)</SelectItem>
+                        <SelectItem value="concept">💡 Conceito (reimaginação)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Modelo de IA para Análise</Label>
+                    <Select value={selectedAIModel} onValueChange={setSelectedAIModel}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</SelectItem>
+                        <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Melhor)</SelectItem>
+                        <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
+                        <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
+                        <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Provider de Geração</Label>
-                  <Select value={provider} onValueChange={(v: any) => setProvider(v)}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pollinations">Pollinations.ai (Gratuito)</SelectItem>
-                      <SelectItem value="huggingface">HuggingFace (Requer Token)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Modelo de Imagem</Label>
-                  <Button 
-                    variant="outline" 
-                    className="w-full justify-between"
-                    onClick={() => setShowModelSelector(true)}
-                  >
-                    <span>{provider === 'huggingface' ? huggingfaceModel : imageModel}</span>
-                    <ImageIcon className="h-4 w-4 ml-2" />
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    {provider === 'pollinations' ? '🆓 Gratuito, sem limites' : '🔑 Requer token HuggingFace'}
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Variações por Thumbnail</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="5"
-                    value={modelingQuantity}
-                    onChange={(e) => setModelingQuantity(parseInt(e.target.value) || 1)}
+                <div className="space-y-2 mb-4">
+                  <Label>Instruções Personalizadas (Opcional)</Label>
+                  <Textarea
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value)}
+                    placeholder="Ex: Adicione mais contraste, use cores vibrantes, destaque o texto..."
+                    className="min-h-[80px]"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>🤖 Modelo de IA para Análise</Label>
-                  <Select value={selectedAIModel} onValueChange={setSelectedAIModel}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</SelectItem>
-                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Preciso)</SelectItem>
-                      <SelectItem value="gpt-4o">GPT-4o (Visão)</SelectItem>
-                      <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
-                      <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    IA com visão para analisar a imagem de referência
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="include-text"
-                      checked={includeText}
-                      onCheckedChange={(checked) => {
-                        setIncludeText(checked as boolean);
-                        if (!checked) setCustomText('');
-                      }}
-                    />
-                    <Label htmlFor="include-text" className="cursor-pointer">
-                      Incluir texto na imagem
-                    </Label>
-                  </div>
-
-                  {includeText && (
-                    <div className="ml-6 space-y-2">
-                      <Label htmlFor="custom-text" className="text-sm">
-                        Texto para incluir (usa mesma fonte/estilo da thumbnail)
-                      </Label>
-                      <Input
-                        id="custom-text"
-                        placeholder="Ex: CLIQUE AQUI, IMPERDÍVEL, REVELADO..."
-                        value={customText}
-                        onChange={(e) => setCustomText(e.target.value)}
-                        className="font-semibold"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        💡 Deixe em branco para manter texto original
-                      </p>
-                    </div>
+                {/* Botão de análise */}
+                <Button 
+                  onClick={handleAnalyzeImage}
+                  disabled={isAnalyzing || !selectedImage}
+                  className="w-full mb-4"
+                  size="lg"
+                >
+                  {isAnalyzing ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Analisando...
+                    </>
+                  ) : (
+                    '🔍 Analisar Imagem e Gerar Prompt'
                   )}
-                </div>
-              </div>
+                </Button>
 
-              <div className="space-y-2">
-                <Label>Instruções Customizadas (Opcional)</Label>
-                <Textarea
-                  placeholder="Ex: Usar cores mais quentes, adicionar sombras dramáticas, estilo cartoon..."
-                  value={customInstructions}
-                  onChange={(e) => setCustomInstructions(e.target.value)}
-                  rows={3}
-                />
-              </div>
-
-              <Button
-                onClick={handleModelThumbnails}
-                disabled={isModeling || (competitorImages.length === 0 && uploadedImages.length === 0)}
-                className="w-full"
-                size="lg"
-              >
-                {isModeling ? (
-                  <>
-                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                    Modelando {currentModelingIndex}/{competitorImages.length + uploadedImages.length}...
-                  </>
-                ) : (
-                  <>
-                    <ImageIcon className="h-5 w-5 mr-2" />
-                    🎨 Gerar Variações ({competitorImages.length + uploadedImages.length} {competitorImages.length + uploadedImages.length === 1 ? 'imagem' : 'imagens'})
-                  </>
+                {/* Área de streaming do prompt */}
+                {(isAnalyzing || analyzedPrompt) && (
+                  <Card className="p-4 bg-muted">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-sm font-semibold flex items-center gap-2">
+                        {isAnalyzing ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Gerando Prompt em Tempo Real...
+                          </>
+                        ) : (
+                          <>✅ Prompt Gerado</>
+                        )}
+                      </Label>
+                      {analysisComplete && (
+                        <div className="flex gap-2">
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={copyPromptToClipboard}
+                          >
+                            <Copy className="h-3 w-3 mr-1" />
+                            Copiar
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => {
+                              setAnalyzedPrompt('');
+                              setAnalysisComplete(false);
+                            }}
+                          >
+                            Limpar
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <Textarea
+                      value={analyzedPrompt}
+                      onChange={(e) => setAnalyzedPrompt(e.target.value)}
+                      placeholder="O prompt aparecerá aqui em tempo real..."
+                      className="min-h-[200px] font-mono text-sm"
+                      disabled={isAnalyzing}
+                    />
+                    
+                    {isAnalyzing && (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
+                        <span>⏳ Aguarde enquanto a IA analisa sua imagem...</span>
+                        <span className="text-primary font-mono">{analyzedPrompt.length} caracteres</span>
+                      </div>
+                    )}
+                    
+                    {analysisComplete && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        💡 Você pode editar o prompt antes de gerar as imagens
+                      </div>
+                    )}
+                  </Card>
                 )}
-              </Button>
+
+                {/* Botão MODELAR */}
+                {analysisComplete && analyzedPrompt && (
+                  <Button 
+                    onClick={() => setShowGenerationDialog(true)}
+                    className="w-full mt-4"
+                    size="lg"
+                  >
+                    🎨 MODELAR
+                  </Button>
+                )}
+              </Card>
 
               {/* Resultados */}
-              {modelingResults && (
-                <div className="space-y-8 pt-6 border-t">
-                  {modelingResults.results.map((result: any, idx: number) => (
-                    <div key={idx} className="space-y-4">
-                      <div className="flex items-center gap-4">
-                        <img
-                          src={getOriginalImagePreview(result)}
-                          className="w-32 h-18 object-cover rounded-lg shadow-md"
-                          alt="Original"
-                        />
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold">
-                            {getOriginalImageTitle(result)}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">
-                            {result.error ? `❌ Erro: ${result.error}` : `✅ ${result.generatedImages?.length || 0} variações geradas`}
-                          </p>
-                        </div>
+              {modelingResults.length > 0 && (
+                <Card className="p-6">
+                  <h3 className="text-xl font-bold mb-4">🎉 Imagens Geradas</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {modelingResults.map((imageUrl, idx) => (
+                      <div key={idx} className="space-y-2">
+                        <img src={imageUrl} alt={`Gerada ${idx + 1}`} className="w-full rounded-lg" />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => downloadModeledImage(imageUrl, idx)}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Baixar #{idx + 1}
+                        </Button>
                       </div>
-
-                      {result.analysis && (
-                        <Card className="p-4 bg-muted">
-                          <details>
-                            <summary className="cursor-pointer font-medium">
-                              Ver Análise da IA
-                            </summary>
-                            <pre className="text-xs whitespace-pre-wrap mt-2 overflow-auto max-h-48">
-                              {result.analysis}
-                            </pre>
-                          </details>
-                        </Card>
-                      )}
-
-                      {result.generatedImages && result.generatedImages.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {result.generatedImages.map((img: string, imgIdx: number) => (
-                            <Card key={imgIdx} className="p-4 space-y-3">
-                              <img
-                                src={img}
-                                alt={`Variação ${imgIdx + 1}`}
-                                className="w-full rounded-lg shadow-md"
-                              />
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="w-full"
-                                onClick={() => downloadModeledImage(img, imgIdx, getOriginalImageTitle(result))}
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Baixar Variação {imgIdx + 1}
-                              </Button>
-                            </Card>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                </Card>
               )}
 
               {/* Histórico */}
               {modelingHistory.length > 0 && (
-                <div className="pt-6 border-t">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-semibold">Histórico Recente</h3>
+                <Card className="p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-xl font-bold">📚 Histórico de Modelagens</h3>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
+                        <Button variant="outline" size="sm">
                           <Trash2 className="h-4 w-4 mr-2" />
-                          Excluir Tudo
+                          Limpar Tudo
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>Excluir todo o histórico?</AlertDialogTitle>
                           <AlertDialogDescription>
-                            Essa ação não pode ser desfeita. Todas as modelagens salvas serão removidas.
+                            Esta ação não pode ser desfeita.
                           </AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={deleteAllModeling}>Excluir</AlertDialogAction>
+                          <AlertDialogAction onClick={deleteAllModeling}>
+                            Excluir Tudo
+                          </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
                   </div>
 
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {modelingHistory.map((item) => (
-                      <Card key={item.id} className="p-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 flex-1">
-                            {Array.isArray(item.generated_images) && item.generated_images?.length > 0 ? (
-                              <img src={item.generated_images[0]} alt="preview" className="w-20 h-14 object-cover rounded" />
-                            ) : (
-                              <div className="w-20 h-14 rounded bg-muted" />
-                            )}
-                            <div>
-                              <p className="text-sm font-medium">
-                                {item.quantity} variações • {item.modeling_level} • {item.image_generator}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {new Date(item.created_at).toLocaleString('pt-BR')}
-                              </p>
-                            </div>
+                      <Card key={item.id} className="p-4">
+                        <div className="flex gap-4">
+                          <img 
+                            src={item.original_image_url}
+                            alt="Original"
+                            className="w-32 h-20 object-cover rounded"
+                          />
+                          <div className="flex-1">
+                            <p className="text-sm text-muted-foreground">
+                              {new Date(item.created_at).toLocaleString('pt-BR')}
+                            </p>
+                            <p className="text-sm">
+                              <strong>Nível:</strong> {item.modeling_level} • 
+                              <strong> Gerador:</strong> {item.image_generator} •
+                              <strong> Qtd:</strong> {item.quantity}
+                            </p>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Button size="sm" variant="outline" onClick={() => { setPreviewItem(item); setIsPreviewOpen(true); }}>
-                              <Eye className="h-4 w-4 mr-2" /> Ver
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setPreviewItem(item);
+                                setIsPreviewOpen(true);
+                              }}
+                            >
+                              <Eye className="h-4 w-4" />
                             </Button>
-                            <Button size="sm" variant="destructive" onClick={() => deleteModelingItem(item.id)}>
-                              <Trash2 className="h-4 w-4 mr-2" /> Excluir
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => deleteModelingItem(item.id)}
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
                       </Card>
                     ))}
                   </div>
+                </Card>
+              )}
+            </div>
+          </SubscriptionGuard>
+        </TabsContent>
+      </Tabs>
 
-                  <Dialog open={showModelSelector} onOpenChange={setShowModelSelector}>
-                    <DialogContent className="max-w-4xl">
-                      <DialogHeader>
-                        <DialogTitle>Selecionar Modelo de Imagem</DialogTitle>
-                      </DialogHeader>
-                      <ModelSelector
-                        value={provider === 'huggingface' ? huggingfaceModel : imageModel}
-                        onChange={(v) => {
-                          if (provider === 'huggingface') {
-                            setHuggingfaceModel(v);
-                          } else {
-                            setImageModel(v);
-                          }
-                          setShowModelSelector(false);
-                        }}
-                        provider={provider}
-                      />
-                    </DialogContent>
-                  </Dialog>
+      {/* Dialog de Geração (Passo 2) */}
+      <Dialog open={showGenerationDialog} onOpenChange={setShowGenerationDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>🎨 Gerar Variações da Thumbnail</DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            {/* Preview do prompt */}
+            <div>
+              <Label className="text-sm font-semibold mb-2">📝 Prompt que será usado:</Label>
+              <div className="p-3 bg-muted rounded-lg max-h-[150px] overflow-y-auto">
+                <p className="text-sm whitespace-pre-wrap">
+                  {analyzedPrompt.substring(0, 300)}...
+                </p>
+              </div>
+            </div>
+            
+            {/* Seletor de Provider */}
+            <div>
+              <Label>Provider de Geração</Label>
+              <Select 
+                value={selectedProvider} 
+                onValueChange={(v: any) => {
+                  setSelectedProvider(v);
+                  setSelectedModel(v === 'huggingface' ? 'flux-schnell' : 'pollinations');
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pollinations">
+                    🌸 Pollinations.ai (Gratuito, Rápido)
+                  </SelectItem>
+                  <SelectItem value="huggingface">
+                    🤗 HuggingFace (Requer Token)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Seletor de Modelo */}
+            <div>
+              <Label>Modelo</Label>
+              <Select value={selectedModel} onValueChange={setSelectedModel}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {selectedProvider === 'pollinations' ? (
+                    <>
+                      <SelectItem value="pollinations">Flux (Padrão)</SelectItem>
+                      <SelectItem value="pollinations-flux-realism">Flux Realism</SelectItem>
+                      <SelectItem value="pollinations-flux-anime">Flux Anime</SelectItem>
+                      <SelectItem value="pollinations-flux-3d">Flux 3D</SelectItem>
+                      <SelectItem value="pollinations-turbo">Turbo (Ultra Rápido)</SelectItem>
+                    </>
+                  ) : (
+                    <>
+                      <SelectItem value="flux-schnell">FLUX Schnell (Rápido)</SelectItem>
+                      <SelectItem value="flux-dev">FLUX Dev (Qualidade)</SelectItem>
+                      <SelectItem value="sdxl">SDXL (Melhor Qualidade)</SelectItem>
+                      <SelectItem value="sdxl-turbo">SDXL Turbo</SelectItem>
+                      <SelectItem value="sd-21">Stable Diffusion 2.1</SelectItem>
+                      <SelectItem value="sd-15">Stable Diffusion 1.5</SelectItem>
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Quantidade */}
+            <div>
+              <Label>Quantidade de Variações</Label>
+              <Select 
+                value={generationQuantity.toString()} 
+                onValueChange={(v) => setGenerationQuantity(parseInt(v))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">1 variação</SelectItem>
+                  <SelectItem value="2">2 variações</SelectItem>
+                  <SelectItem value="3">3 variações</SelectItem>
+                  <SelectItem value="4">4 variações</SelectItem>
+                  <SelectItem value="5">5 variações</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-                  <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-                    <DialogContent className="max-w-4xl">
-                      <DialogHeader>
-                        <DialogTitle>Imagens Geradas</DialogTitle>
-                      </DialogHeader>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {Array.isArray(previewItem?.generated_images) && previewItem?.generated_images?.map((img: string, idx: number) => (
-                          <Card key={idx} className="p-3 space-y-3">
-                            <img src={img} alt={`Imagem ${idx + 1}`} className="w-full rounded" />
-                            <Button size="sm" variant="outline" className="w-full" onClick={() => downloadModeledImage(img, idx, 'historico')}>
-                              <Download className="h-4 w-4 mr-2" /> Baixar {idx + 1}
-                            </Button>
-                          </Card>
-                        ))}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+            {/* Estimativa de tempo */}
+            <div className="text-sm text-muted-foreground">
+              ⏱️ Tempo estimado: ~{generationQuantity * (selectedProvider === 'pollinations' ? 5 : 15)} segundos
+            </div>
+            
+            {/* Botões */}
+            <div className="flex gap-2 pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowGenerationDialog(false)}
+                className="flex-1"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleGenerateVariations}
+                disabled={isGenerating}
+                className="flex-1"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Gerando {generationQuantity}x...
+                  </>
+                ) : (
+                  `✨ Gerar ${generationQuantity} Variações`
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Preview */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Preview das Imagens Geradas</DialogTitle>
+          </DialogHeader>
+          {previewItem && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="font-semibold mb-2">Original:</h3>
+                <img src={previewItem.original_image_url} alt="Original" className="w-full rounded-lg" />
+              </div>
+              <div>
+                <h3 className="font-semibold mb-2">Geradas ({previewItem.generated_images?.length || 0}):</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {previewItem.generated_images?.map((img: string, idx: number) => (
+                    <div key={idx}>
+                      <img src={img} alt={`Gerada ${idx + 1}`} className="w-full rounded-lg" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full mt-2"
+                        onClick={() => downloadModeledImage(img, idx)}
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Baixar
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {previewItem.ai_analysis && (
+                <div>
+                  <h3 className="font-semibold mb-2">Análise da IA:</h3>
+                  <div className="p-4 bg-muted rounded-lg max-h-[200px] overflow-y-auto">
+                    <p className="text-sm whitespace-pre-wrap">{previewItem.ai_analysis}</p>
+                  </div>
                 </div>
               )}
             </div>
-          </Card>
-        </TabsContent>
-      </Tabs>
-      
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual */}
       <Dialog open={showManual} onOpenChange={setShowManual}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Manual Completo - Prompts de Thumbnail</DialogTitle>
+            <DialogTitle>Manual de Uso - Prompts de Thumbnail</DialogTitle>
           </DialogHeader>
           <UserManual />
         </DialogContent>

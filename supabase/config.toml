@@ -14,3 +14,9 @@ verify_jwt = false
 
 [functions.model-thumbnail]
 verify_jwt = true
+
+[functions.analyze-thumbnail-streaming]
+verify_jwt = true
+
+[functions.generate-thumbnail-variations]
+verify_jwt = true
