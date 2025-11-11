@@ -19,4 +19,4 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.generate-thumbnail-variations]
-verify_jwt = true
+verify_jwt = false
