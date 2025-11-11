@@ -92,29 +92,40 @@ serve(async (req) => {
         .limit(1)
         .single();
 
+      // Se não encontrou chave do usuário, fazer fallback para API gratuita do sistema
       if (keyError || !keyData) {
-        throw new Error(`Nenhuma chave ${apiProvider.toUpperCase()} configurada para este usuário`);
-      }
-
-      // Descriptografar chave
-      const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
-        p_encrypted: keyData.api_key_encrypted,
-        p_user_id: userId,
-      });
-
-      if (decErr || !decrypted) {
-        throw new Error(`Falha ao descriptografar chave ${apiProvider.toUpperCase()}`);
-      }
-
-      apiKey = decrypted as string;
-
-      // Se for Vertex AI, preparar configuração especial
-      if (provider === 'vertex-ai' && keyData.vertex_config) {
-        // A URL será construída pelo buildGeminiOrVertexRequest
-        apiUrl = ''; // Será sobrescrito
+        console.log(`⚠️ [analyze-titles] Nenhuma chave ${apiProvider.toUpperCase()} do usuário encontrada, usando fallback para Gemini gratuito`);
+        
+        // Usar chave Gemini gratuita do sistema
+        apiKey = Deno.env.get('GEMINI_API_KEY');
+        if (!apiKey) {
+          throw new Error('Nenhuma API key disponível. Configure sua chave Vertex AI ou Gemini nas configurações.');
+        }
+        
+        // Forçar uso do Gemini gratuito
+        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
       } else {
-        // API Gemini gratuita
-        apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        // Descriptografar chave
+        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+          p_encrypted: keyData.api_key_encrypted,
+          p_user_id: userId,
+        });
+
+        if (decErr || !decrypted) {
+          throw new Error(`Falha ao descriptografar chave ${apiProvider.toUpperCase()}`);
+        }
+
+        apiKey = decrypted as string;
+
+        // Se for Vertex AI, preparar configuração especial
+        if (provider === 'vertex-ai' && keyData.vertex_config) {
+          // A URL será construída pelo buildGeminiOrVertexRequest
+          apiUrl = ''; // Será sobrescrito
+        } else {
+          // API Gemini gratuita
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        }
       }
     } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
@@ -248,125 +259,176 @@ IMPORTANTE:
       analysis = { markdownReport };
       
     } else if (provider === 'gemini' || provider === 'vertex-ai') {
-      // Buscar configuração completa para Vertex AI
-      let keyInfo: any = { key: apiKey };
-      
-      if (provider === 'vertex-ai' && userId) {
-        const { data: vertexKey } = await supabase
-          .from('user_api_keys')
-          .select('vertex_config')
-          .eq('user_id', userId)
-          .eq('api_provider', 'vertex-ai')
-          .eq('is_active', true)
-          .single();
-        
-        if (vertexKey?.vertex_config) {
-          keyInfo = {
-            key: apiKey,
-            provider: 'vertex-ai',
-            vertexConfig: vertexKey.vertex_config
-          };
-        }
-      }
-
-      // Construir requisição usando helper
-      const { url, headers, body } = await buildGeminiOrVertexRequest(
-        keyInfo,
-        model,
-        prompt,
-        false
-      );
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        const providerName = provider === 'vertex-ai' ? 'Vertex AI' : 'Gemini';
-        console.error(`${providerName} API error:`, errorText);
-        throw new Error(`${providerName} API error: ${response.status} - ${errorText}`);
-      }
-
-      const data = await response.json();
-      console.log('Gemini response received:', JSON.stringify(data, null, 2));
-      
-      const candidate = data?.candidates?.[0];
-      if (!candidate) {
-        console.error('Invalid Gemini response structure:', data);
-        throw new Error('Invalid Gemini API response: missing candidates');
-      }
-
-      let markdownReport = '';
-      const parts = candidate?.content?.parts;
-      if (Array.isArray(parts) && parts.length > 0) {
-        markdownReport = parts
-          .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? '')))
-          .join('');
-      } else if (typeof (candidate as any).text === 'string') {
-        markdownReport = (candidate as any).text;
-      }
-      if (!markdownReport && typeof (data as any).text === 'string') {
-        markdownReport = (data as any).text;
-      }
-
-      if (!markdownReport || !markdownReport.trim()) {
-        const finishReason = (candidate as any)?.finishReason ?? data?.promptFeedback?.blockReason ?? 'unknown';
-        const safety = (candidate as any)?.safetyRatings ?? data?.promptFeedback?.safetyRatings;
-        console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
-
-        // Retry with a compact prompt using the SAME model (no fallback)
-        try {
-          const compactHeader = `MODO COMPACTO:\n- Mantenha as MESMAS seções e a mesma ordem\n- Limite para: 20 títulos no total (4 por campeão) e 5 títulos finais\n- Seja objetivo e direto\n`;
-          const compactPrompt = compactHeader +
-            prompt
-              .replace('## **✨ 50 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**', '## **✨ 20 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**')
-              .replace('Repetir para Campeões 3, 4 e 5 até completar 50 títulos', 'Repetir para Campeões 3, 4 e 5 até completar 20 títulos')
-              .replace('## ⭐ **10 TÍTULOS FINAIS COM MAIOR POTENCIAL**', '## ⭐ **5 TÍTULOS FINAIS COM MAIOR POTENCIAL**');
-
-          console.log('Retrying with compact prompt');
-          const { url: retryUrl, headers: retryHeaders, body: retryBody } = await buildGeminiOrVertexRequest(
-            keyInfo,
-            model,
-            compactPrompt,
-            false
-          );
-          
-          const retryResp = await fetch(retryUrl, {
-            method: 'POST',
-            headers: retryHeaders,
-            body: JSON.stringify(retryBody),
-          });
-
-          if (retryResp.ok) {
-            const rdata = await retryResp.json();
-            const rcand = rdata?.candidates?.[0];
-            let rmd = '';
-            const rparts = rcand?.content?.parts;
-            if (Array.isArray(rparts) && rparts.length > 0) {
-              rmd = rparts.map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? ''))).join('');
-            } else if (typeof (rcand as any)?.text === 'string') {
-              rmd = (rcand as any).text;
+      // Se estamos usando fallback (apiUrl já está definido), fazer request simples
+      if (apiUrl) {
+        // Usando Gemini gratuito como fallback
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            safetySettings: [
+              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+            ],
+            generationConfig: {
+              temperature: 0.8,
+              topP: 0.95
             }
-            if (!rmd && typeof (rdata as any).text === 'string') rmd = (rdata as any).text;
-            if (rmd && rmd.trim()) {
-              analysis = { markdownReport: rmd };
-              console.log('Gemini compact retry succeeded');
-            }
-          } else {
-            console.error('Gemini compact retry error:', await retryResp.text());
-          }
-        } catch (retryErr) {
-          console.error('Compact retry failed:', retryErr);
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Gemini API error:', errorText);
+          throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
         }
 
-        if (!analysis.markdownReport) {
-          throw new Error('Gemini não retornou texto (possível bloqueio de segurança ou limite). Tente reduzir os dados ou refazer a análise em partes.');
+        const data = await response.json();
+        const candidate = data?.candidates?.[0];
+        if (!candidate) {
+          throw new Error('Invalid Gemini API response: missing candidates');
         }
-      } else {
+
+        let markdownReport = '';
+        const parts = candidate?.content?.parts;
+        if (Array.isArray(parts) && parts.length > 0) {
+          markdownReport = parts
+            .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? '')))
+            .join('');
+        }
+
+        if (!markdownReport || !markdownReport.trim()) {
+          throw new Error('Gemini não retornou texto válido');
+        }
+
         analysis = { markdownReport };
+      } else {
+        // Usar chave do usuário com Vertex AI ou Gemini
+        // Buscar configuração completa para Vertex AI
+        let keyInfo: any = { key: apiKey };
+        
+        if (provider === 'vertex-ai' && userId) {
+          const { data: vertexKey } = await supabase
+            .from('user_api_keys')
+            .select('vertex_config')
+            .eq('user_id', userId)
+            .eq('api_provider', 'vertex-ai')
+            .eq('is_active', true)
+            .single();
+          
+          if (vertexKey?.vertex_config) {
+            keyInfo = {
+              key: apiKey,
+              provider: 'vertex-ai',
+              vertexConfig: vertexKey.vertex_config
+            };
+          }
+        }
+
+        // Construir requisição usando helper
+        const { url, headers, body } = await buildGeminiOrVertexRequest(
+          keyInfo,
+          model,
+          prompt,
+          false
+        );
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          const providerName = provider === 'vertex-ai' ? 'Vertex AI' : 'Gemini';
+          console.error(`${providerName} API error:`, errorText);
+          throw new Error(`${providerName} API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('Gemini response received:', JSON.stringify(data, null, 2));
+        
+        const candidate = data?.candidates?.[0];
+        if (!candidate) {
+          console.error('Invalid Gemini response structure:', data);
+          throw new Error('Invalid Gemini API response: missing candidates');
+        }
+
+        let markdownReport = '';
+        const parts = candidate?.content?.parts;
+        if (Array.isArray(parts) && parts.length > 0) {
+          markdownReport = parts
+            .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? '')))
+            .join('');
+        } else if (typeof (candidate as any).text === 'string') {
+          markdownReport = (candidate as any).text;
+        }
+        if (!markdownReport && typeof (data as any).text === 'string') {
+          markdownReport = (data as any).text;
+        }
+
+        if (!markdownReport || !markdownReport.trim()) {
+          const finishReason = (candidate as any)?.finishReason ?? data?.promptFeedback?.blockReason ?? 'unknown';
+          const safety = (candidate as any)?.safetyRatings ?? data?.promptFeedback?.safetyRatings;
+          console.error('Gemini missing text. finishReason:', finishReason, 'safety:', safety);
+
+          // Retry with a compact prompt using the SAME model (no fallback)
+          try {
+            const compactHeader = `MODO COMPACTO:\n- Mantenha as MESMAS seções e a mesma ordem\n- Limite para: 20 títulos no total (4 por campeão) e 5 títulos finais\n- Seja objetivo e direto\n`;
+            const compactPrompt = compactHeader +
+              prompt
+                .replace('## **✨ 50 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**', '## **✨ 20 NOVOS TÍTULOS BASEADOS NOS 5 CAMPEÕES**')
+                .replace('Repetir para Campeões 3, 4 e 5 até completar 50 títulos', 'Repetir para Campeões 3, 4 e 5 até completar 20 títulos')
+                .replace('## ⭐ **10 TÍTULOS FINAIS COM MAIOR POTENCIAL**', '## ⭐ **5 TÍTULOS FINAIS COM MAIOR POTENCIAL**');
+
+            console.log('Retrying with compact prompt');
+            const { url: retryUrl, headers: retryHeaders, body: retryBody } = await buildGeminiOrVertexRequest(
+              keyInfo,
+              model,
+              compactPrompt,
+              false
+            );
+            
+            const retryResp = await fetch(retryUrl, {
+              method: 'POST',
+              headers: retryHeaders,
+              body: JSON.stringify(retryBody),
+            });
+
+            if (retryResp.ok) {
+              const rdata = await retryResp.json();
+              const rcand = rdata?.candidates?.[0];
+              let rmd = '';
+              const rparts = rcand?.content?.parts;
+              if (Array.isArray(rparts) && rparts.length > 0) {
+                rmd = rparts.map((p: any) => (typeof p === 'string' ? p : (p?.text ?? p?.inlineData?.data ?? ''))).join('');
+              } else if (typeof (rcand as any)?.text === 'string') {
+                rmd = (rcand as any).text;
+              }
+              if (!rmd && typeof (rdata as any).text === 'string') rmd = (rdata as any).text;
+              if (rmd && rmd.trim()) {
+                analysis = { markdownReport: rmd };
+                console.log('Gemini compact retry succeeded');
+              }
+            } else {
+              console.error('Gemini compact retry error:', await retryResp.text());
+            }
+          } catch (retryErr) {
+            console.error('Compact retry failed:', retryErr);
+          }
+
+          if (!analysis.markdownReport) {
+            throw new Error('Gemini não retornou texto (possível bloqueio de segurança ou limite). Tente reduzir os dados ou refazer a análise em partes.');
+          }
+        } else {
+          analysis = { markdownReport };
+        }
       }
     } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
