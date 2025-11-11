@@ -1,4 +1,4 @@
-// Pollinations.ai integration - Progressive generation (1 image per request)
+// Image generation integration - Pollinations, HuggingFace, and Google AI (Nano Banana)
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -88,6 +88,139 @@ serve(async (req) => {
     console.log(`   Image Model: ${imageModel}`);
     console.log(`   Prompt Style: ${promptStyle}`);
     console.log(`   Aspect Ratio: ${aspectRatio}`);
+
+    // Verificar se é Nano Banana (Google AI)
+    if (provider === 'google' || imageModel === 'nano-banana') {
+      console.log(`🍌 Usando Nano Banana (Google AI)`);
+      
+      // Buscar chave do usuário primeiro, depois fallback para env
+      let GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+      let usingUserKey = false;
+      
+      try {
+        const { data: userKeys, error: keyError } = await supabase
+          .from('user_api_keys')
+          .select('api_key_encrypted')
+          .eq('user_id', userId)
+          .eq('api_provider', 'gemini')
+          .eq('is_active', true)
+          .order('priority', { ascending: true })
+          .limit(1);
+
+        if (!keyError && userKeys && userKeys.length > 0) {
+          const { data: decryptedKey, error: decryptError } = await supabase
+            .rpc('decrypt_api_key', {
+              p_encrypted: userKeys[0].api_key_encrypted,
+              p_user_id: userId
+            });
+
+          if (!decryptError && decryptedKey) {
+            GEMINI_API_KEY = decryptedKey.trim();
+            usingUserKey = true;
+            console.log('✅ Usando chave Gemini do usuário');
+          }
+        }
+      } catch (error) {
+        console.error('⚠️ Erro ao buscar chave do usuário:', error);
+      }
+      
+      if (!GEMINI_API_KEY) {
+        throw new Error('❌ Gemini API Key não configurado.\n\n📝 Para usar o Nano Banana:\n1. Acesse Configurações no menu\n2. Role até "Gemini API Key"\n3. Adicione sua chave do Google AI Studio\n\nOu use o provider "Pollinations.ai" que é 100% gratuito!');
+      }
+      
+      // Aplicar enhancement de estilo
+      const styleEnhancements: Record<string, string> = {
+        'realistic': 'realistic, photorealistic',
+        'hyper-realistic': 'hyper-realistic, ultra detailed, 8k',
+        'photo-8k': '8k photography, high resolution',
+        'cinematic': 'cinematic lighting, dramatic',
+        'sharp-focus': 'sharp focus, high detail',
+        'long-exposure': 'long exposure photography',
+        'black-white': 'black and white photography',
+        'macro': 'macro photography',
+        'digital-art': 'digital art',
+        'concept-art': 'concept art',
+        'fantasy-art': 'fantasy art',
+        'sci-fi-art': 'sci-fi art',
+        '3d-render': '3d render',
+        'pixel-art': 'pixel art',
+        'anime': 'anime style',
+        'comics': 'comic book style',
+        'watercolor': 'watercolor painting',
+        'oil-painting': 'oil painting',
+        'surrealism': 'surrealism',
+        'minimalist': 'minimalist'
+      };
+      
+      const enhancedPrompt = promptStyle !== 'none' && styleEnhancements[promptStyle]
+        ? `${prompt}, ${styleEnhancements[promptStyle]}`
+        : prompt;
+      
+      console.log(`📡 Google AI (Nano Banana) Request:`);
+      console.log(`   Model: gemini-2.5-flash-image-preview`);
+      console.log(`   Enhanced prompt: ${enhancedPrompt.substring(0, 200)}`);
+      
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: enhancedPrompt
+              }]
+            }],
+            generationConfig: {
+              responseModalities: ['image', 'text'],
+              temperature: 0.7,
+            }
+          })
+        }
+      );
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`❌ Google AI Error ${response.status}:`, errorText);
+        
+        if (response.status === 401 || response.status === 403) {
+          throw new Error('❌ Chave Gemini inválida.\n\n🔑 Verifique:\n1. Cole a chave correta do Google AI Studio\n2. Clique em "Salvar" após colar\n\nObtenha em: https://aistudio.google.com/apikey');
+        }
+        
+        throw new Error(`Google AI retornou erro ${response.status}: ${errorText.substring(0, 200)}`);
+      }
+      
+      const data = await response.json();
+      console.log('📦 Google AI response:', JSON.stringify(data).substring(0, 500));
+      
+      // Extrair imagem do response
+      const candidate = data.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
+      
+      let imageUrl = '';
+      for (const part of parts) {
+        if (part.inlineData?.mimeType?.startsWith('image/')) {
+          imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          break;
+        }
+      }
+      
+      if (!imageUrl) {
+        throw new Error('Nenhuma imagem retornada pelo Google AI');
+      }
+      
+      console.log(`✅ Nano Banana: Imagem gerada com sucesso`);
+      
+      return new Response(
+        JSON.stringify({ 
+          images: [imageUrl],
+          prompt: enhancedPrompt
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
       return new Response(

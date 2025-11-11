@@ -52,8 +52,8 @@ const GeradorImagens = () => {
   const [promptStyle, setPromptStyle] = useState("cinematic");
   const [numImages, setNumImages] = useState(1);
   const [quality, setQuality] = useState("standard");
-  const [provider, setProvider] = useState<"pollinations" | "huggingface">("pollinations");
-  const [imageModel, setImageModel] = useState<"pollinations" | "pollinations-flux-realism" | "pollinations-flux-anime" | "pollinations-flux-3d" | "pollinations-turbo">("pollinations");
+  const [provider, setProvider] = useState<"pollinations" | "huggingface" | "google">("pollinations");
+  const [imageModel, setImageModel] = useState<"pollinations" | "pollinations-flux-realism" | "pollinations-flux-anime" | "pollinations-flux-3d" | "pollinations-turbo" | "nano-banana">("pollinations");
   const [huggingfaceModel, setHuggingfaceModel] = useState("sdxl");
   
   const { toast } = useToast();
@@ -123,24 +123,26 @@ const GeradorImagens = () => {
     }
   };
 
-  const handleDeleteImage = async (imageUrl: string) => {
+  const handleDeleteImage = async (imageId: string) => {
     try {
       const { error } = await supabase
         .from('generated_images')
         .delete()
-        .eq('image_url', imageUrl);
+        .eq('id', imageId)
+        .eq('user_id', user?.id);
       
       if (error) throw error;
       
-      setGeneratedImages(prev => prev.filter(img => img.url !== imageUrl));
+      setGeneratedImages(prev => prev.filter(img => img.id !== imageId));
       toast({
         title: "Imagem Removida",
         description: "A imagem foi excluída com sucesso",
       });
     } catch (error: any) {
+      console.error('Erro ao excluir imagem:', error);
       toast({
         title: "Erro ao excluir",
-        description: error.message,
+        description: error.message || "Não foi possível excluir a imagem",
         variant: "destructive",
       });
     }
@@ -348,12 +350,21 @@ const GeradorImagens = () => {
           try {
             console.log(`Gerando imagem ${imgIndex + 1}/${numImages} da cena ${sceneIndex + 1}/${scenes.length}`);
 
+            // Determinar provider correto baseado no modelo
+            let actualProvider = provider;
+            let actualModel = provider === "pollinations" ? imageModel : huggingfaceModel;
+            
+            if (imageModel === "nano-banana") {
+              actualProvider = "google";
+              actualModel = "nano-banana";
+            }
+
             const { data, error } = await supabase.functions.invoke('generate-images', {
               body: {
                 prompt: scenes[sceneIndex],
                 aspectRatio,
-                provider,
-                imageModel: provider === "pollinations" ? imageModel : huggingfaceModel,
+                provider: actualProvider,
+                imageModel: actualModel,
                 promptStyle,
                 numImages: 1
               }
@@ -529,17 +540,26 @@ const GeradorImagens = () => {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="provider">Provider</Label>
-                <Select value={provider} onValueChange={(value: any) => setProvider(value)}>
+                <Select value={provider} onValueChange={(value: any) => {
+                  setProvider(value);
+                  // Auto-select appropriate model when changing provider
+                  if (value === "google") setImageModel("nano-banana");
+                  else if (value === "pollinations") setImageModel("pollinations");
+                  else if (value === "huggingface") setHuggingfaceModel("flux-schnell");
+                }}>
                   <SelectTrigger id="provider">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="google">Google AI - Nano Banana 🍌</SelectItem>
                     <SelectItem value="pollinations">Pollinations.ai (Gratuito)</SelectItem>
                     <SelectItem value="huggingface">HuggingFace (Premium)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  {provider === "pollinations" 
+                  {provider === "google"
+                    ? "🍌 Google Gemini 2.5 Flash Image - Requer chave API"
+                    : provider === "pollinations" 
                     ? "✨ 100% gratuito, sem configuração" 
                     : "🚀 Modelos premium - Requer API key"}
                 </p>
@@ -553,11 +573,14 @@ const GeradorImagens = () => {
                   onClick={() => setShowModelSelector(true)}
                 >
                   <ImageIcon className="h-4 w-4 mr-2" />
-                  {provider === "pollinations" 
+                  {provider === "google"
+                    ? "Nano Banana 🍌"
+                    : provider === "pollinations" 
                     ? imageModel === "pollinations" ? "Flux (Padrão)" 
                     : imageModel === "pollinations-flux-realism" ? "Flux Realism"
                     : imageModel === "pollinations-flux-anime" ? "Flux Anime"
                     : imageModel === "pollinations-flux-3d" ? "Flux 3D"
+                    : imageModel === "nano-banana" ? "Nano Banana 🍌"
                     : "Turbo (Rápido)"
                     : MODELS.find(m => m.id === huggingfaceModel)?.name || huggingfaceModel
                   }
@@ -695,7 +718,8 @@ const GeradorImagens = () => {
                      <Button 
                        size="icon" 
                        variant="destructive"
-                       onClick={() => handleDeleteImage(image.url)}
+                       onClick={() => handleDeleteImage(image.id!)}
+                       disabled={!image.id}
                        className="h-8 w-8"
                      >
                        <X className="h-4 w-4" />

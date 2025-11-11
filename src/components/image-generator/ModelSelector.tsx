@@ -12,11 +12,23 @@ interface ModelConfig {
   speed: "fast" | "medium" | "slow";
   quality: "standard" | "high" | "ultra";
   maxSize: string;
-  provider: "pollinations" | "huggingface";
+  provider: "pollinations" | "huggingface" | "google";
   preview?: string;
 }
 
 const MODELS: ModelConfig[] = [
+  // Google AI Models (Nano Banana)
+  {
+    id: "nano-banana",
+    name: "Nano Banana 🍌",
+    description: "Gemini 2.5 Flash Image - Geração rápida com IA do Google",
+    category: "universal",
+    speed: "fast",
+    quality: "ultra",
+    maxSize: "1024x1024",
+    provider: "google"
+  },
+  
   // Pollinations Models (Recomendados - Todos funcionam)
   {
     id: "pollinations",
@@ -124,6 +136,7 @@ const MODELS: ModelConfig[] = [
 
 const CATEGORIES = [
   { id: "all", name: "Todos", icon: ImageIcon },
+  { id: "google", name: "Google AI", icon: Sparkles },
   { id: "pollinations", name: "Pollinations", icon: Sparkles },
   { id: "huggingface", name: "HuggingFace", icon: ImageIcon },
   { id: "universal", name: "Universal", icon: Sparkles },
@@ -136,7 +149,7 @@ const CATEGORIES = [
 interface ModelSelectorProps {
   value: string;
   onChange: (value: string) => void;
-  provider: "pollinations" | "huggingface";
+  provider: "pollinations" | "huggingface" | "google";
 }
 
 export function ModelSelector({ value, onChange, provider }: ModelSelectorProps) {
@@ -181,6 +194,7 @@ export function ModelSelector({ value, onChange, provider }: ModelSelectorProps)
               {availableModels
                 .filter(model => {
                   if (category.id === "all") return true;
+                  if (category.id === "google") return model.provider === "google";
                   if (category.id === "pollinations") return model.provider === "pollinations";
                   if (category.id === "huggingface") return model.provider === "huggingface";
                   return model.category === category.id;
