@@ -1160,6 +1160,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           is_current: boolean | null
+          key_hash: string | null
           last_used_at: string | null
           priority: number | null
           quota_status: Json | null
@@ -1173,6 +1174,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           is_current?: boolean | null
+          key_hash?: string | null
           last_used_at?: string | null
           priority?: number | null
           quota_status?: Json | null
@@ -1186,6 +1188,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           is_current?: boolean | null
+          key_hash?: string | null
           last_used_at?: string | null
           priority?: number | null
           quota_status?: Json | null
