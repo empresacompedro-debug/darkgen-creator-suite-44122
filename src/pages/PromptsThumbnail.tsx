@@ -282,6 +282,7 @@ const PromptsThumbnail = () => {
             customInstructions,
             quantity: modelingQuantity,
             imageGenerator: provider,
+            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
           }
         });
 
@@ -339,6 +340,7 @@ const PromptsThumbnail = () => {
             customInstructions,
             quantity: modelingQuantity,
             imageGenerator: provider,
+            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
           }
         });
 
