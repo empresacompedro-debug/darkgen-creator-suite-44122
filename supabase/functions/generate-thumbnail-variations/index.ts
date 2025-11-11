@@ -14,7 +14,7 @@ serve(async (req) => {
   try {
     console.log('📨 [Generate Variations] Request received');
     
-    const { prompt, provider, model, quantity } = await req.json();
+    const { prompt, provider, model, quantity, imageBase64, strength = 0.75 } = await req.json();
 
     if (!prompt) throw new Error('prompt is required');
     if (!provider) throw new Error('provider is required');
@@ -34,8 +34,8 @@ serve(async (req) => {
         const token = Deno.env.get('HUGGING_FACE_ACCESS_TOKEN');
         if (!token) throw new Error('HuggingFace token not configured');
         
-        const imageBase64 = await generateWithHuggingFace(prompt, model, token);
-        generatedImages.push(imageBase64);
+        const imageBase64Data = await generateWithHuggingFace(prompt, model, token, imageBase64, strength);
+        generatedImages.push(imageBase64Data);
       } else {
         throw new Error(`Unknown provider: ${provider}`);
       }
@@ -112,7 +112,7 @@ async function generateWithPollinations(prompt: string, model: string): Promise<
   return `data:image/png;base64,${base64}`;
 }
 
-async function generateWithHuggingFace(prompt: string, model: string, token: string): Promise<string> {
+async function generateWithHuggingFace(prompt: string, model: string, token: string, imageBase64?: string, strength: number = 0.75): Promise<string> {
   const modelMap: Record<string, string> = {
     'flux-schnell': 'black-forest-labs/FLUX.1-schnell',
     'flux-dev': 'black-forest-labs/FLUX.1-dev',
@@ -124,11 +124,31 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
 
   const modelId = modelMap[model] || modelMap['flux-schnell'];
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
+  
+  // Se temos imagem original, usar img2img
+  const useImg2Img = imageBase64 && imageBase64.length > 0;
+  if (useImg2Img) {
+    console.log(`🖼️ [HuggingFace] Using Image-to-Image mode with strength: ${strength}`);
+  }
 
   try {
     // Primary: Router hf-inference models endpoint
     const apiUrl = `https://router.huggingface.co/hf-inference/models/${modelId}`;
     console.log(`🔗 [HuggingFace] Calling: ${apiUrl}`);
+
+    const requestBody: any = {
+      inputs: prompt,
+      parameters: {
+        width: 1280,
+        height: 720
+      }
+    };
+    
+    // Adicionar imagem e strength se for img2img
+    if (useImg2Img) {
+      requestBody.image = imageBase64;
+      requestBody.parameters.strength = strength;
+    }
 
     let response = await fetch(apiUrl, {
       method: 'POST',
@@ -137,13 +157,7 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
         'Content-Type': 'application/json',
         'Accept': 'image/png'
       },
-      body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          width: 1280,
-          height: 720
-        }
-      })
+      body: JSON.stringify(requestBody)
     });
 
     // Fallback: task-based endpoint if we receive the deprecation message or non-OK
@@ -152,6 +166,21 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
       console.warn(`⚠️ [HuggingFace] models endpoint failed: ${response.status} - ${errorText?.slice(0, 200)}`);
       if (errorText?.includes('api-inference.huggingface.co is no longer supported')) {
         console.log('↩️ [HuggingFace] Retrying via task endpoint');
+        const fallbackBody: any = {
+          task: useImg2Img ? 'image-to-image' : 'text-to-image',
+          model: modelId,
+          inputs: prompt,
+          parameters: {
+            width: 1280,
+            height: 720
+          }
+        };
+        
+        if (useImg2Img) {
+          fallbackBody.image = imageBase64;
+          fallbackBody.parameters.strength = strength;
+        }
+        
         response = await fetch('https://router.huggingface.co/hf-inference', {
           method: 'POST',
           headers: {
@@ -159,15 +188,7 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
             'Content-Type': 'application/json',
             'Accept': 'image/png'
           },
-          body: JSON.stringify({
-            task: 'text-to-image',
-            model: modelId,
-            inputs: prompt,
-            parameters: {
-              width: 1280,
-              height: 720
-            }
-          })
+          body: JSON.stringify(fallbackBody)
         });
       } else {
         throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);

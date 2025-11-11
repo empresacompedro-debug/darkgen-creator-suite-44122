@@ -17,6 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { UserManual } from "@/components/thumbnail-prompt/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 
 const PromptsThumbnail = () => {
   const { toast } = useToast();
@@ -66,6 +67,7 @@ const PromptsThumbnail = () => {
   const [selectedProvider, setSelectedProvider] = useState<'huggingface' | 'pollinations'>('pollinations');
   const [selectedModel, setSelectedModel] = useState('pollinations');
   const [generationQuantity, setGenerationQuantity] = useState(2);
+  const [strengthValue, setStrengthValue] = useState(0.75); // Controla similaridade
   const [isGenerating, setIsGenerating] = useState(false);
   
   // Resultados e histórico
@@ -491,12 +493,24 @@ const PromptsThumbnail = () => {
     try {
       console.log('🎨 [Frontend] Starting generation...');
       
+      // Obter imagem original em base64
+      let imageBase64 = '';
+      if (selectedImage) {
+        if (selectedImage.type === 'youtube') {
+          imageBase64 = selectedImage.data.base64 || await urlToBase64(selectedImage.data.thumbnailUrl);
+        } else {
+          imageBase64 = await fileToBase64(selectedImage.data);
+        }
+      }
+      
       const { data, error } = await supabase.functions.invoke('generate-thumbnail-variations', {
         body: {
           prompt: analyzedPrompt,
           provider: selectedProvider,
           model: selectedModel,
-          quantity: generationQuantity
+          quantity: generationQuantity,
+          imageBase64, // Enviar imagem original
+          strength: strengthValue // Controle de similaridade
         }
       });
 
@@ -1365,6 +1379,31 @@ const PromptsThumbnail = () => {
                 </SelectContent>
               </Select>
             </div>
+            
+            {/* Controle de Similaridade (apenas HuggingFace) */}
+            {selectedProvider === 'huggingface' && (
+              <div className="space-y-2">
+                <Label htmlFor="strength">
+                  Similaridade com Original: {strengthValue.toFixed(2)}
+                </Label>
+                <Slider
+                  id="strength"
+                  min={0.5}
+                  max={1.0}
+                  step={0.05}
+                  value={[strengthValue]}
+                  onValueChange={(value) => setStrengthValue(value[0])}
+                  className="w-full"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {strengthValue < 0.65 
+                    ? '🎯 Muito similar à original' 
+                    : strengthValue < 0.8 
+                    ? '⚖️ Equilibrado' 
+                    : '🎨 Mais criativo/diferente'}
+                </p>
+              </div>
+            )}
 
             {/* Estimativa de tempo */}
             <div className="text-sm text-muted-foreground">
