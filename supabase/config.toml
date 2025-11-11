@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.revalidate-exhausted-keys]
 verify_jwt = false
+
+[functions.test-vertex-api]
+verify_jwt = false

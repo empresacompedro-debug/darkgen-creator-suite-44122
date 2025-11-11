@@ -29,11 +29,18 @@ interface ApiKey {
   last_used_at?: string;
 }
 
+interface VertexApiKey extends ApiKey {
+  projectId?: string;
+  location?: string;
+  jsonFile?: File;
+}
+
 const Configuracoes = () => {
   const { toast } = useToast();
   const [user, setUser] = useState<any>(null);
   const [youtubeKeys, setYoutubeKeys] = useState<ApiKey[]>([]);
   const [geminiKeys, setGeminiKeys] = useState<ApiKey[]>([]);
+  const [vertexKeys, setVertexKeys] = useState<VertexApiKey[]>([]);
   const [claudeKeys, setClaudeKeys] = useState<ApiKey[]>([]);
   const [openaiKeys, setOpenaiKeys] = useState<ApiKey[]>([]);
   const [huggingfaceKeys, setHuggingfaceKeys] = useState<ApiKey[]>([]);
@@ -100,28 +107,34 @@ const Configuracoes = () => {
       const groupedKeys = {
         youtube: [] as ApiKey[],
         gemini: [] as ApiKey[],
+        'vertex-ai': [] as VertexApiKey[],
         claude: [] as ApiKey[],
         openai: [] as ApiKey[],
         huggingface: [] as ApiKey[]
       };
 
       data?.forEach((key: any) => {
-        const apiKey: ApiKey = {
+        const apiKey: ApiKey | VertexApiKey = {
           id: key.id,
           key: '••••••••••••••••', // Don't show encrypted key, just placeholder
           is_active: key.is_active,
           priority: key.priority || 1,
           is_current: key.is_current || false,
-          last_used_at: key.last_used_at
+          last_used_at: key.last_used_at,
+          ...(key.api_provider === 'vertex-ai' && key.vertex_config ? {
+            projectId: key.vertex_config.project_id,
+            location: key.vertex_config.location
+          } : {})
         };
 
         if (key.api_provider in groupedKeys) {
-          groupedKeys[key.api_provider as keyof typeof groupedKeys].push(apiKey);
+          groupedKeys[key.api_provider as keyof typeof groupedKeys].push(apiKey as any);
         }
       });
 
       setYoutubeKeys(groupedKeys.youtube);
       setGeminiKeys(groupedKeys.gemini);
+      setVertexKeys(groupedKeys['vertex-ai']);
       setClaudeKeys(groupedKeys.claude);
       setOpenaiKeys(groupedKeys.openai);
       setHuggingfaceKeys(groupedKeys.huggingface);
@@ -156,6 +169,7 @@ const Configuracoes = () => {
       const setters = {
         youtube: setYoutubeKeys,
         gemini: setGeminiKeys,
+        'vertex-ai': setVertexKeys,
         claude: setClaudeKeys,
         openai: setOpenaiKeys,
         huggingface: setHuggingfaceKeys
@@ -168,7 +182,7 @@ const Configuracoes = () => {
     }
   };
 
-  const handleSave = async (provider: string, keys: ApiKey[]) => {
+  const handleSave = async (provider: string, keys: (ApiKey | VertexApiKey)[]) => {
     if (!user) {
       toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
       return;
@@ -197,9 +211,19 @@ const Configuracoes = () => {
         console.log(`🔄 [HandleSave] Atualizando ${existingToUpdate.length} prioridades...`);
         for (let i = 0; i < existingToUpdate.length; i++) {
           const k = existingToUpdate[i];
+          const updateData: any = { priority: k.priority, updated_at: new Date().toISOString() };
+          
+          // Se for Vertex AI, também atualizar vertex_config
+          if (provider === 'vertex-ai' && 'projectId' in k && k.projectId) {
+            updateData.vertex_config = {
+              project_id: k.projectId,
+              location: (k as VertexApiKey).location || 'us-central1'
+            };
+          }
+          
           const { error: updateError } = await supabase
             .from('user_api_keys')
-            .update({ priority: k.priority, updated_at: new Date().toISOString() })
+            .update(updateData)
             .eq('id', k.id);
           if (updateError) {
             console.error('❌ Erro ao atualizar prioridade:', updateError);
@@ -228,14 +252,24 @@ const Configuracoes = () => {
             throw new Error(`Erro ao criptografar chave ${i + 1}: ${encryptError.message}`);
           }
           
-          preparedKeys.push({
+          const keyData: any = {
             user_id: user.id,
             api_provider: provider,
             api_key_encrypted: encryptedKey,
             is_active: true,
             priority: k.priority || 1,
             updated_at: new Date().toISOString(),
-          });
+          };
+          
+          // Se for Vertex AI, adicionar vertex_config
+          if (provider === 'vertex-ai' && 'projectId' in k && k.projectId) {
+            keyData.vertex_config = {
+              project_id: k.projectId,
+              location: (k as VertexApiKey).location || 'us-central1'
+            };
+          }
+          
+          preparedKeys.push(keyData);
         }
 
         console.log(`✅ [HandleSave] Criptografia completa. Inserindo ${preparedKeys.length} chave(s) no banco (batch)...`);
@@ -288,17 +322,28 @@ const Configuracoes = () => {
     }
   };
   const addKey = (provider: string) => {
-    const newKey: ApiKey = {
-      id: `new-${Date.now()}`,
-      key: '',
-      is_active: true,
-      priority: 1,
-      is_current: false
-    };
+    const newKey: ApiKey | VertexApiKey = provider === 'vertex-ai' 
+      ? {
+          id: `new-${Date.now()}`,
+          key: '',
+          is_active: true,
+          priority: 1,
+          is_current: false,
+          projectId: '',
+          location: 'us-central1'
+        }
+      : {
+          id: `new-${Date.now()}`,
+          key: '',
+          is_active: true,
+          priority: 1,
+          is_current: false
+        };
 
     switch(provider) {
       case 'youtube': setYoutubeKeys([...youtubeKeys, newKey]); break;
       case 'gemini': setGeminiKeys([...geminiKeys, newKey]); break;
+      case 'vertex-ai': setVertexKeys([...vertexKeys, newKey as VertexApiKey]); break;
       case 'claude': setClaudeKeys([...claudeKeys, newKey]); break;
       case 'openai': setOpenaiKeys([...openaiKeys, newKey]); break;
       case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, newKey]); break;
@@ -317,6 +362,7 @@ const Configuracoes = () => {
       switch(provider) {
         case 'youtube': setYoutubeKeys(youtubeKeys.filter(k => k.id !== id)); break;
         case 'gemini': setGeminiKeys(geminiKeys.filter(k => k.id !== id)); break;
+        case 'vertex-ai': setVertexKeys(vertexKeys.filter(k => k.id !== id)); break;
         case 'claude': setClaudeKeys(claudeKeys.filter(k => k.id !== id)); break;
         case 'openai': setOpenaiKeys(openaiKeys.filter(k => k.id !== id)); break;
         case 'huggingface': setHuggingfaceKeys(huggingfaceKeys.filter(k => k.id !== id)); break;
@@ -325,11 +371,12 @@ const Configuracoes = () => {
   };
 
   const updateKey = (provider: string, id: string, field: string, value: any) => {
-    const updater = (keys: ApiKey[]) => keys.map(k => k.id === id ? { ...k, [field]: value } : k);
+    const updater = (keys: (ApiKey | VertexApiKey)[]) => keys.map(k => k.id === id ? { ...k, [field]: value } : k);
     
     switch(provider) {
       case 'youtube': setYoutubeKeys(updater(youtubeKeys)); break;
       case 'gemini': setGeminiKeys(updater(geminiKeys)); break;
+      case 'vertex-ai': setVertexKeys(updater(vertexKeys) as VertexApiKey[]); break;
       case 'claude': setClaudeKeys(updater(claudeKeys)); break;
       case 'openai': setOpenaiKeys(updater(openaiKeys)); break;
       case 'huggingface': setHuggingfaceKeys(updater(huggingfaceKeys)); break;
@@ -359,6 +406,74 @@ const Configuracoes = () => {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setValidatingKey(null);
+    }
+  };
+
+  const validateVertexKey = async (keyId: string, serviceAccountJson: string, projectId: string, location: string) => {
+    setValidatingKey(keyId);
+    try {
+      const { data, error } = await supabase.functions.invoke('test-vertex-api', {
+        body: { serviceAccountJson, projectId, location }
+      });
+
+      if (error) throw error;
+
+      if (data?.valid) {
+        toast({ 
+          title: "✅ Credenciais Vertex AI válidas!", 
+          description: `${data.modelsCount || 0} modelos disponíveis`,
+          duration: 5000
+        });
+        return true;
+      } else {
+        toast({ 
+          title: "❌ Credenciais inválidas", 
+          description: data?.message || "Erro ao validar", 
+          variant: "destructive" 
+        });
+        return false;
+      }
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return false;
+    } finally {
+      setValidatingKey(null);
+    }
+  };
+
+  const handleVertexJsonUpload = async (keyId: string, file: File) => {
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      
+      // Validar campos obrigatórios
+      if (!json.type || !json.project_id || !json.private_key || !json.client_email) {
+        toast({
+          title: "❌ JSON inválido",
+          description: "Service Account JSON está incompleto. Faltam campos obrigatórios.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Atualizar a chave com o JSON
+      updateKey('vertex-ai', keyId, 'key', text);
+      
+      // Extrair project_id automaticamente
+      if (json.project_id) {
+        updateKey('vertex-ai', keyId, 'projectId', json.project_id);
+      }
+
+      toast({
+        title: "✅ JSON carregado",
+        description: `Service Account: ${json.client_email}`
+      });
+    } catch (error: any) {
+      toast({
+        title: "❌ Erro ao ler arquivo",
+        description: "Arquivo JSON inválido ou corrompido",
+        variant: "destructive"
+      });
     }
   };
 
@@ -763,6 +878,168 @@ const Configuracoes = () => {
 
       {renderKeySection("YouTube API Keys", "youtube", youtubeKeys)}
       {renderKeySection("Gemini API Keys", "gemini", geminiKeys)}
+      
+      {/* Vertex AI Section - Special rendering com upload de JSON */}
+      <Card className="p-6 bg-gradient-to-br from-amber-500/10 to-orange-500/10 border-amber-500/30">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-lg font-semibold">💰 Vertex AI (Google Cloud) - PAGO</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Service Account com autenticação OAuth 2.0. <strong>Escalona automaticamente quando Gemini gratuito esgotar.</strong>
+              </p>
+            </div>
+            <Button size="sm" onClick={() => addKey('vertex-ai')}>
+              <Plus className="h-4 w-4 mr-2" />
+              Adicionar Credencial
+            </Button>
+          </div>
+
+          {vertexKeys.length === 0 && (
+            <div className="bg-background/50 rounded-lg p-4">
+              <p className="text-sm text-muted-foreground">Nenhuma credencial Vertex AI cadastrada</p>
+              <Alert className="mt-3">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  <strong>💡 Economia Inteligente:</strong> Suas chaves Gemini gratuitas serão usadas primeiro. 
+                  Vertex AI só será usado quando todas as chaves Gemini estiverem esgotadas.
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
+
+          {vertexKeys.map((key, index) => (
+            <div key={key.id} className="border rounded-lg p-4 space-y-3 bg-background/30">
+              <div className="flex items-center gap-2">
+                <Badge variant={key.is_active ? "default" : "destructive"}>
+                  {key.is_active ? "✅ Ativa" : "⚠️ Esgotada"}
+                </Badge>
+                <Badge variant="secondary">💰 PAGO</Badge>
+                {key.is_current && <Badge variant="secondary">🎯 Em Uso</Badge>}
+                <span className="text-xs text-muted-foreground ml-auto">Prioridade: {key.priority}</span>
+              </div>
+
+              {/* Upload JSON */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Service Account JSON</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="file"
+                    accept=".json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleVertexJsonUpload(key.id, file);
+                    }}
+                    disabled={key.key !== '' && key.key !== '••••••••••••••••'}
+                    className="flex-1"
+                  />
+                  {key.key === '••••••••••••••••' && (
+                    <Badge variant="outline" className="self-center whitespace-nowrap">✅ JSON Salvo</Badge>
+                  )}
+                </div>
+                {key.key && key.key !== '••••••••••••••••' && (
+                  <p className="text-xs text-muted-foreground">
+                    ✅ JSON carregado ({key.key.length} caracteres)
+                  </p>
+                )}
+              </div>
+
+              {/* Project ID */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Google Cloud Project ID</Label>
+                <Input
+                  type="text"
+                  value={key.projectId || ''}
+                  onChange={(e) => updateKey('vertex-ai', key.id, 'projectId', e.target.value)}
+                  placeholder="my-project-id"
+                  className="font-mono text-sm"
+                />
+              </div>
+
+              {/* Location */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Region/Location</Label>
+                <select
+                  value={key.location || 'us-central1'}
+                  onChange={(e) => updateKey('vertex-ai', key.id, 'location', e.target.value)}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                  <option value="us-central1">us-central1 (Iowa)</option>
+                  <option value="us-east1">us-east1 (South Carolina)</option>
+                  <option value="us-west1">us-west1 (Oregon)</option>
+                  <option value="europe-west1">europe-west1 (Belgium)</option>
+                  <option value="europe-west4">europe-west4 (Netherlands)</option>
+                  <option value="asia-northeast1">asia-northeast1 (Tokyo)</option>
+                  <option value="asia-southeast1">asia-southeast1 (Singapore)</option>
+                </select>
+              </div>
+
+              {/* Validar Credenciais */}
+              {key.key && key.key !== '••••••••••••••••' && key.projectId && (
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => validateVertexKey(key.id, key.key, key.projectId!, key.location || 'us-central1')}
+                  disabled={validatingKey === key.id}
+                  className="w-full"
+                >
+                  {validatingKey === key.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Validando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCheck className="h-4 w-4 mr-2" />
+                      Validar Credenciais
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {/* Prioridade e Remover */}
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <Label className="text-xs">Prioridade (1 = usar primeiro)</Label>
+                  <Slider
+                    value={[key.priority]}
+                    onValueChange={(v) => updateKey('vertex-ai', key.id, 'priority', v[0])}
+                    min={1}
+                    max={10}
+                    step={1}
+                  />
+                </div>
+                <Button size="sm" variant="outline" onClick={() => removeKey('vertex-ai', key.id)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {vertexKeys.length > 0 && (
+            <Button 
+              onClick={() => handleSave('vertex-ai', vertexKeys)} 
+              disabled={savingProvider === 'vertex-ai'}
+              className="w-full"
+            >
+              {savingProvider === 'vertex-ai' ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {saveProgress.total > 0 
+                    ? `Criptografando ${saveProgress.current}/${saveProgress.total}...`
+                    : 'Salvando...'}
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Salvar Credenciais Vertex AI
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </Card>
+      
       {renderKeySection("Claude API Keys", "claude", claudeKeys)}
       {renderKeySection("OpenAI API Keys", "openai", openaiKeys)}
       

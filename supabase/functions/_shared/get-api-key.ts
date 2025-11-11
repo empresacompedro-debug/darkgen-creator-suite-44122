@@ -3,9 +3,9 @@ import { getNextKeyRoundRobin, markKeyExhaustedAndGetNext } from './round-robin.
 
 export async function getApiKey(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface' | 'vertex-ai',
   supabaseClient: any
-): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number } | null> {
+): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number; vertexConfig?: any } | null> {
   console.log(`🔍 [API Key] Fetching key for provider: ${provider}, userId: ${userId}`);
   
   // Try to get user-specific API key using round-robin if userId is provided
@@ -15,6 +15,20 @@ export async function getApiKey(
       
       if (result) {
         console.log(`✅ [API Key] Using user key ${result.keyNumber}/${result.totalKeys} (Round-Robin)`);
+        
+        // Se for vertex-ai, buscar vertex_config da chave
+        if (provider === 'vertex-ai') {
+          const { data: keyData } = await supabaseClient
+            .from('user_api_keys')
+            .select('vertex_config')
+            .eq('id', result.keyId)
+            .single();
+          
+          if (keyData?.vertex_config) {
+            return { ...result, vertexConfig: keyData.vertex_config };
+          }
+        }
+        
         return result;
       }
     } catch (error: any) {
@@ -50,7 +64,7 @@ export async function markApiKeyAsExhaustedAndRotate(
   keyId: string,
   provider: string,
   supabaseClient: any
-): Promise<{ key: string; keyId: string; rotated: boolean; keyNumber?: number; totalKeys?: number } | null> {
+): Promise<{ key: string; keyId: string; rotated: boolean; keyNumber?: number; totalKeys?: number; vertexConfig?: any } | null> {
   console.log(`⚠️ [Key Rotation] Marking key as exhausted: ${keyId}`);
   
   if (!userId || keyId === 'global') {
@@ -63,7 +77,7 @@ export async function markApiKeyAsExhaustedAndRotate(
     const result = await markKeyExhaustedAndGetNext(
       userId,
       keyId,
-      provider as 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
+      provider as 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface' | 'vertex-ai',
       supabaseClient
     );
 
@@ -135,11 +149,52 @@ export async function markApiKeyAsExceeded(
 
 // Helper universal para executar requisições com rotação automática de API keys
 // Agora usa sistema Round-Robin para melhor distribuição de carga
+/**
+ * Sistema de Fallback Hierárquico: Gemini (gratuito) → Vertex AI (pago)
+ * Tenta usar Gemini primeiro, se não houver chaves ativas escalona para Vertex AI
+ */
+export async function getApiKeyWithHierarchicalFallback(
+  userId: string | undefined,
+  preferredProvider: 'gemini' | 'vertex-ai',
+  supabaseClient: any
+): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number; provider: string; vertexConfig?: any } | null> {
+  console.log(`🎯 [Hierarchical Fallback] Buscando chave com preferência: ${preferredProvider}`);
+  
+  // 1. Tentar provider preferido (gemini)
+  if (preferredProvider === 'gemini') {
+    const geminiResult = await getApiKey(userId, 'gemini', supabaseClient);
+    
+    if (geminiResult) {
+      console.log(`✅ [Hierarchical Fallback] Usando Gemini (gratuito) - key ${geminiResult.keyNumber}/${geminiResult.totalKeys}`);
+      return { ...geminiResult, provider: 'gemini' };
+    }
+    
+    // 2. Se não houver chaves Gemini ativas, escalonar para Vertex AI
+    console.log('⚠️ [Hierarchical Fallback] Sem chaves Gemini ativas, escalando para Vertex AI (pago)...');
+    const vertexResult = await getApiKey(userId, 'vertex-ai', supabaseClient);
+    
+    if (vertexResult) {
+      console.log(`💰 [Hierarchical Fallback] Usando Vertex AI (pago) - key ${vertexResult.keyNumber}/${vertexResult.totalKeys}`);
+      return { ...vertexResult, provider: 'vertex-ai' };
+    }
+  } else {
+    // Se preferiu Vertex AI diretamente
+    const vertexResult = await getApiKey(userId, 'vertex-ai', supabaseClient);
+    if (vertexResult) {
+      console.log(`💰 [Hierarchical Fallback] Usando Vertex AI (pago) - key ${vertexResult.keyNumber}/${vertexResult.totalKeys}`);
+      return { ...vertexResult, provider: 'vertex-ai' };
+    }
+  }
+  
+  console.error('❌ [Hierarchical Fallback] Nenhuma chave disponível (Gemini ou Vertex AI)');
+  return null;
+}
+
 export async function executeWithKeyRotation<T>(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface' | 'vertex-ai',
   supabaseClient: any,
-  executeRequest: (apiKey: string) => Promise<T>,
+  executeRequest: (apiKey: string, providerUsed?: string, vertexConfig?: any) => Promise<T>,
   maxRetries: number = 3
 ): Promise<T> {
   console.log(`🚀 [Execute] Starting request with Round-Robin rotation (max ${maxRetries} retries)`);
@@ -149,10 +204,25 @@ export async function executeWithKeyRotation<T>(
   let currentKeyNumber: number | undefined;
   let totalKeys: number | undefined;
 
+  let currentProvider = provider;
+
   while (currentAttempt < maxRetries) {
     try {
-      // Get current API key using Round-Robin
-      const keyData = await getApiKey(userId, provider, supabaseClient);
+      // Get current API key using Round-Robin (ou fallback hierárquico se for gemini/vertex-ai)
+      let keyData;
+      
+      if (provider === 'gemini') {
+        // Usar sistema hierárquico: Gemini → Vertex AI
+        keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+        if (keyData) {
+          currentProvider = keyData.provider as any;
+        }
+      } else {
+        keyData = await getApiKey(userId, provider, supabaseClient);
+        if (keyData) {
+          keyData = { ...keyData, provider };
+        }
+      }
       
       if (!keyData) {
         throw new Error(`No API key available for ${provider}`);
@@ -163,13 +233,13 @@ export async function executeWithKeyRotation<T>(
       totalKeys = keyData.totalKeys;
       
       if (currentKeyNumber && totalKeys) {
-        console.log(`🔑 [Execute] Attempt ${currentAttempt + 1}: Using key ${currentKeyNumber}/${totalKeys} (Round-Robin)`);
+        console.log(`🔑 [Execute] Attempt ${currentAttempt + 1}: Using ${currentProvider} key ${currentKeyNumber}/${totalKeys} (Round-Robin)`);
       } else {
         console.log(`🔑 [Execute] Attempt ${currentAttempt + 1}: Using global key`);
       }
 
-      // Execute the request
-      const result = await executeRequest(keyData.key);
+      // Execute the request (passar provider e vertexConfig se aplicável)
+      const result = await executeRequest(keyData.key, currentProvider, keyData.vertexConfig);
       
       // ✅ REMOVIDO: Double update de last_used_at
       // O update já foi feito atomicamente no get_and_update_next_key()

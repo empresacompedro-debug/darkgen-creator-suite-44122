@@ -1166,6 +1166,7 @@ export type Database = {
           quota_status: Json | null
           updated_at: string | null
           user_id: string
+          vertex_config: Json | null
         }
         Insert: {
           api_key_encrypted?: string | null
@@ -1180,6 +1181,7 @@ export type Database = {
           quota_status?: Json | null
           updated_at?: string | null
           user_id: string
+          vertex_config?: Json | null
         }
         Update: {
           api_key_encrypted?: string | null
@@ -1194,6 +1196,7 @@ export type Database = {
           quota_status?: Json | null
           updated_at?: string | null
           user_id?: string
+          vertex_config?: Json | null
         }
         Relationships: []
       }
