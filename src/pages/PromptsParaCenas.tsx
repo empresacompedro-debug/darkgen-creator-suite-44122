@@ -120,6 +120,7 @@ const PromptsParaCenas = () => {
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session.access_token}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({ 
             script, 
@@ -138,11 +139,23 @@ const PromptsParaCenas = () => {
       if (!response.ok) {
         // Tentar ler erro JSON
         const contentType = response.headers.get('content-type');
+        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
+        
         if (contentType?.includes('application/json')) {
           const errorData = await response.json();
-          throw new Error(errorData.error || `Erro ${response.status}: ${errorData.details || 'Erro desconhecido'}`);
+          errorMessage = errorData.error || errorData.details || errorMessage;
         }
-        throw new Error(`Erro ${response.status}: ${response.statusText}`);
+        
+        // Mensagens específicas por tipo de erro
+        if (response.status === 429) {
+          errorMessage = '⚠️ Limite de quota excedido. Aguarde alguns minutos ou adicione outra API key em Configurações.';
+        } else if (response.status === 400 && errorMessage.includes('safety')) {
+          errorMessage = '🚫 Conteúdo bloqueado por filtro de segurança. Ajuste o roteiro ou tente outro modelo de IA.';
+        } else if (errorMessage.includes('Nenhuma chave')) {
+          errorMessage = '🔑 ' + errorMessage;
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const reader = response.body?.getReader();

@@ -28,24 +28,38 @@ serve(async (req) => {
   try {
     const body = await req.json();
     
-    // Get Supabase client for user API keys
+    // Get Supabase clients
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    
+    // Admin client para operações gerais
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    
     // Get user from auth header
     const authHeader = req.headers.get('Authorization');
     let userId: string | null = null;
     
     if (authHeader) {
       const token = authHeader.replace('Bearer ', '');
-      const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+      const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
       if (!authError && user) {
         userId = user.id;
       }
     }
 
     console.log('👤 [generate-scene-prompts] User ID:', userId);
+    console.log(`🔑 [DEBUG] userId tipo: ${typeof userId}`);
+    
+    // Cliente escopado ao usuário para descriptografar chaves
+    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader || ''
+        }
+      }
+    });
+    console.log('✅ [generate-scene-prompts] Cliente escopado ao usuário criado para decriptação');
     
     // Validate inputs
     const errors = [
@@ -445,7 +459,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           // Tentar chave do usuário primeiro, depois global
           console.log('🔑 Buscando chaves Claude do usuário...');
           console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
-          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'claude', supabase);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'claude', supabaseUser);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -481,7 +495,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           // Tentar chave do usuário primeiro, depois global
           console.log('🔑 Buscando chaves Gemini do usuário...');
           console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
-          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'gemini', supabase);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'gemini', supabaseUser);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -494,21 +508,36 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           
           if (!apiKey) throw new Error('API key não configurada para Gemini');
           
+          // Mapeamento fiel dos modelos Gemini
           const modelMap: Record<string, string> = {
-            'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-            'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-            'gemini-2.5-flash-lite': 'gemini-1.5-flash'
+            'gemini-2.5-pro': 'gemini-2.5-pro',
+            'gemini-2.5-flash': 'gemini-2.5-flash',
+            'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite'
           };
-          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelMap[aiModel] || 'gemini-2.0-flash-exp'}:streamGenerateContent?alt=sse&key=${apiKey}`;
+          const geminiModel = modelMap[aiModel] || 'gemini-2.5-flash';
+          console.log(`🎯 [Gemini] Modelo usado: ${geminiModel}`);
+          
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
           requestBody = {
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }],
+            safetySettings: [
+              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
+            ],
+            generationConfig: {
+              temperature: 0.8,
+              topP: 0.95
+            }
           };
+          console.log('📤 [Gemini] Safety settings desabilitados, temperatura: 0.8');
           
         } else if (aiModel.startsWith('gpt')) {
           // Tentar chave do usuário primeiro, depois global
           console.log('🔑 Buscando chaves OpenAI do usuário...');
           console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
-          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'openai', supabase);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'openai', supabaseUser);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -562,6 +591,21 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           const errorData = await response.text();
           lastError = errorData;
           console.error('❌ [generate-scene-prompts] Erro da API:', errorData);
+          
+          // Tratamento específico de bloqueio de conteúdo (Gemini safety)
+          if (response.status === 400 && aiModel.startsWith('gemini')) {
+            if (errorData.includes('safety') || errorData.includes('blocked') || errorData.includes('SAFETY')) {
+              const safetyError = '🚫 Conteúdo bloqueado pelo Gemini (filtro de segurança). Ajuste o roteiro ou tente outro modelo de IA (Claude, GPT).';
+              console.error('🚫 [Gemini] Bloqueio de safety detectado');
+              return new Response(
+                JSON.stringify({ error: safetyError, details: errorData }),
+                { 
+                  status: 400,
+                  headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+                }
+              );
+            }
+          }
 
           // QUOTA EXCEEDED - Tentar rotacionar chave
           if (response.status === 429 && keyId !== 'global') {
@@ -570,7 +614,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
             const provider = aiModel.startsWith('claude') ? 'claude' : 
                            aiModel.startsWith('gemini') ? 'gemini' : 'openai';
             
-            const nextKey = await markKeyExhaustedAndGetNext(userId ?? undefined, keyId, provider, supabase);
+            const nextKey = await markKeyExhaustedAndGetNext(userId ?? undefined, keyId, provider, supabaseUser);
             
             if (nextKey) {
               console.log(`✅ [generate-scene-prompts] Nova chave disponível (${nextKey.keyNumber}/${nextKey.totalKeys})`);
