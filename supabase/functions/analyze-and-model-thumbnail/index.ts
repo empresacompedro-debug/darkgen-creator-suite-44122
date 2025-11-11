@@ -1,7 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { HfInference } from "https://esm.sh/@huggingface/inference@2.3.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -73,11 +72,6 @@ serve(async (req) => {
       imagefxCookie = cookies.imagefx;
     }
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY not configured');
-    }
-
     console.log(`🎨 Starting analysis for ${imageGenerator} with ${quantity} variations at level: ${modelingLevel}`);
     
     // Validar formato da imagem
@@ -102,69 +96,9 @@ serve(async (req) => {
       console.warn(`⚠️ Large image detected (${sizeInMB.toFixed(2)}MB). May be slow to process.`);
     }
 
-    // ETAPA 1: Análise Visual com Gemini Vision
-    const analysisPrompt = `Analyze this YouTube thumbnail with extreme precision for replication purposes.
-
-OUTPUT AS JSON:
-{
-  "colors": ["#HEX1", "#HEX2", "#HEX3", ...],
-  "layout": {
-    "composition": "rule of thirds / centered / dynamic / asymmetric",
-    "elements": [
-      {"type": "face/text/object/graphic", "position": "X%,Y%", "size": "WxH%", "description": "..."}
-    ]
-  },
-  "typography": {
-    "fonts": [{"text": "exact text", "family": "sans-serif/serif/bold/italic", "size": "approx Xpx", "color": "#HEX", "position": "top/center/bottom"}],
-    "hierarchy": "primary/secondary/tertiary"
-  },
-  "visual_style": "photorealistic/illustrated/3D/flat/minimalist/dramatic/vibrant",
-  "lighting": "natural/studio/dramatic/backlit/soft",
-  "emotion": "urgency/curiosity/excitement/fear/joy/shock",
-  "background": "detailed description of background elements"
-}
-
-Be extremely detailed. Extract EVERY visible element, exact colors, positioning, and styling.`;
-
-    const analysisRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: analysisPrompt },
-            { type: 'image_url', image_url: { url: imageBase64 } }
-          ]
-        }]
-      })
-    });
-
-    let analysis = '';
-    if (!analysisRes.ok) {
-      const errorText = await analysisRes.text();
-      console.error('Analysis failed:', analysisRes.status, errorText);
-      
-      // Tratamento específico
-      if (analysisRes.status === 400) {
-        console.warn('⚠️ Skipping analysis due to invalid image input. Proceeding with generation without detailed analysis.');
-        analysis = '';
-      } else if (analysisRes.status === 429) {
-        throw new Error('Limite de requisições excedido. Aguarde alguns segundos e tente novamente.');
-      } else if (analysisRes.status === 402) {
-        throw new Error('Créditos esgotados. Adicione créditos em Settings → Workspace → Usage.');
-      } else {
-        throw new Error(`Falha na análise da imagem: ${analysisRes.status}. Tente novamente ou use uma imagem diferente.`);
-      }
-    } else {
-      const analysisData = await analysisRes.json();
-      analysis = analysisData.choices?.[0]?.message?.content || '';
-      console.log('🔍 Analysis completed:', analysis.substring(0, 200));
-    }
+    // ETAPA 1: Análise Visual (simplificada para HF e Pollinations)
+    console.log('🔍 Skipping visual analysis - generating based on modeling level only');
+    const analysis = '';
 
     // ETAPA 2: Gerar prompt baseado no nível (para TODOS os geradores)
     let generationPrompt = '';
@@ -246,39 +180,7 @@ Reinterpret the concept with fresh creativity while maintaining strategic effect
         const iterationPrompt = `${generationPrompt}\n\n(Generate variation ${i + 1}/${quantity} - make it unique while following all requirements above)`;
         let imageUrl = '';
 
-        if (imageGenerator === 'lovable-ai' || imageGenerator === 'nano-banana') {
-          // Delay entre requisições para evitar rate limiting
-          if (i > 0) {
-            console.log(`⏳ Waiting 4s before next generation...`);
-            await new Promise(resolve => setTimeout(resolve, 4000));
-          }
-
-          const model = imageGenerator === 'nano-banana' 
-            ? 'google/gemini-2.5-flash-image-preview' 
-            : 'google/gemini-2.5-flash-image-preview';
-
-          const imgRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model,
-              messages: [{ role: 'user', content: iterationPrompt }],
-              modalities: ['image', 'text']
-            })
-          });
-
-          if (imgRes.ok) {
-            const imgData = await imgRes.json();
-            imageUrl = imgData.choices?.[0]?.message?.images?.[0]?.image_url?.url || '';
-          } else {
-            const errorText = await imgRes.text();
-            console.error(`❌ Image generation ${i + 1} failed:`, imgRes.status, errorText);
-          }
-
-        } else if (imageGenerator === 'whisk') {
+        if (imageGenerator === 'whisk') {
           if (!cookieWhisk) {
             throw new Error('Whisk cookie not configured. Configure em Configurações → Cookies para Geração de Imagens.');
           }
@@ -328,39 +230,50 @@ Reinterpret the concept with fresh creativity while maintaining strategic effect
             console.error(`❌ ImageFX generation ${i + 1} failed:`, imagefxRes.status, errTxt);
           }
 
-          // Fallback: usar Lovable AI se nenhum URL foi retornado
-          if (!imageUrl) {
-            try {
-              console.warn(`⚠️ No image from ${imageGenerator}. Falling back to Lovable AI...`);
-              const fallbackRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  model: 'google/gemini-2.5-flash-image-preview',
-                  messages: [{ role: 'user', content: iterationPrompt }],
-                  modalities: ['image', 'text']
-                })
-              });
-              if (fallbackRes.ok) {
-                const fData = await fallbackRes.json();
-                imageUrl = fData.choices?.[0]?.message?.images?.[0]?.image_url?.url || '';
-              } else {
-                console.error('Fallback generation failed:', await fallbackRes.text());
-              }
-            } catch (fbErr) {
-              console.error('Fallback error:', fbErr);
-            }
-          }
         } else if (imageGenerator === 'huggingface') {
           try {
-            const HUGGING_FACE_TOKEN = Deno.env.get('HUGGING_FACE_ACCESS_TOKEN');
-            if (!HUGGING_FACE_TOKEN) {
-              throw new Error('HuggingFace Access Token não configurado. Adicione em Configurações.');
+            // Buscar token do usuário primeiro, depois fallback para env
+            let HUGGING_FACE_TOKEN = Deno.env.get('HUGGING_FACE_ACCESS_TOKEN');
+            let usingUserToken = false;
+            
+            console.log(`🔑 Buscando token HuggingFace para usuário: ${userId}`);
+            
+            if (userId) {
+              try {
+                const { data: userKeys, error: keyError } = await supabase
+                  .from('user_api_keys')
+                  .select('api_key_encrypted')
+                  .eq('user_id', userId)
+                  .eq('api_provider', 'huggingface')
+                  .eq('is_active', true)
+                  .order('priority', { ascending: true })
+                  .limit(1);
+
+                console.log(`📊 Resultado da busca: ${userKeys?.length || 0} tokens encontrados`);
+
+                if (!keyError && userKeys && userKeys.length > 0) {
+                  console.log('🔓 Descriptografando token do usuário...');
+                  const { data: decryptedKey, error: decryptError } = await supabase
+                    .rpc('decrypt_api_key', {
+                      p_encrypted: userKeys[0].api_key_encrypted,
+                      p_user_id: userId
+                    });
+
+                  if (!decryptError && decryptedKey) {
+                    HUGGING_FACE_TOKEN = decryptedKey.trim();
+                    usingUserToken = true;
+                    console.log('✅ Usando token HuggingFace do usuário');
+                  }
+                }
+              } catch (error) {
+                console.error('⚠️ Erro ao buscar token do usuário:', error);
+              }
             }
-            const hf = new HfInference(HUGGING_FACE_TOKEN);
+            
+            if (!HUGGING_FACE_TOKEN) {
+              throw new Error('❌ HuggingFace Access Token não configurado.\n\n📝 Para usar modelos HuggingFace:\n1. Acesse Configurações no menu\n2. Role até "HuggingFace Access Token"\n3. Adicione seu token pessoal\n\nOu use "Pollinations" que é 100% gratuito!');
+            }
+            
             const modelMap: Record<string, string> = {
               'flux-schnell': 'black-forest-labs/FLUX.1-schnell',
               'flux-dev': 'black-forest-labs/FLUX.1-dev',
@@ -372,15 +285,107 @@ Reinterpret the concept with fresh creativity while maintaining strategic effect
             const selectedModel = modelMap[imageModel] || modelMap['flux-schnell'];
             console.log(`🤗 HF generating with ${selectedModel} (requested: ${imageModel})`);
 
-            // Pequeno atraso entre gerações para evitar rate limits
-            if (i > 0) await new Promise(r => setTimeout(r, 1500));
+            // Delay entre gerações
+            if (i > 0) {
+              console.log(`⏳ Waiting 2s before next generation...`);
+              await new Promise(r => setTimeout(r, 2000));
+            }
 
-            const hfImage = await hf.textToImage({ inputs: iterationPrompt, model: selectedModel });
-            const arrayBuffer = await hfImage.arrayBuffer();
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-            imageUrl = `data:image/png;base64,${base64}`;
-          } catch (hfErr) {
+            // Retry logic com nova URL
+            const maxRetries = 3;
+            let lastError: Error | null = null;
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                console.log(`🔄 HF Attempt ${attempt}/${maxRetries}...`);
+                
+                const response = await fetch(`https://router.huggingface.co/hf-inference/models/${selectedModel}`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${HUGGING_FACE_TOKEN}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    inputs: iterationPrompt,
+                    parameters: {
+                      num_inference_steps: 50,
+                      guidance_scale: 7.5,
+                    }
+                  })
+                });
+                
+                console.log(`📊 HF Response status: ${response.status}`);
+                
+                if (!response.ok) {
+                  const errorText = await response.text();
+                  console.error(`❌ HuggingFace Error ${response.status}:`, errorText);
+                  
+                  // Erro 401 - Token inválido
+                  if (response.status === 401) {
+                    if (usingUserToken) {
+                      throw new Error('❌ Seu token HuggingFace está inválido.\n\n🔑 Verifique:\n1. Cole o token correto sem espaços extras\n2. Obtenha um novo token em https://huggingface.co/settings/tokens\n3. Clique em "Salvar" após colar o token\n\nOu use "Pollinations" (100% gratuito)');
+                    } else {
+                      throw new Error('❌ Token padrão inválido.\n\n📝 Configure seu próprio token:\n1. Acesse Configurações\n2. Adicione seu HuggingFace Access Token\n3. Clique em "Salvar"\n\nOu use "Pollinations" (100% gratuito)');
+                    }
+                  }
+                  
+                  // Erro 402 - Créditos excedidos
+                  if (response.status === 402) {
+                    if (usingUserToken) {
+                      throw new Error('❌ Seus créditos do HuggingFace foram excedidos.\n\n💡 Soluções:\n1. Assine o HuggingFace PRO para 20x mais créditos\n2. Use "Pollinations" (100% gratuito)\n3. Aguarde o reset mensal dos créditos');
+                    } else {
+                      throw new Error('❌ O token padrão do HuggingFace excedeu o limite.\n\n📝 Para continuar:\n1. Adicione SEU próprio token em Configurações\n2. Ou use "Pollinations" (100% gratuito e sem limites)');
+                    }
+                  }
+                  
+                  // Modelo carregando (503)
+                  if (response.status === 503 && attempt < maxRetries) {
+                    console.log(`⏳ Modelo carregando... Aguardando ${attempt * 5} segundos...`);
+                    await new Promise(resolve => setTimeout(resolve, attempt * 5000));
+                    continue;
+                  }
+                  
+                  // Rate limit (429)
+                  if (response.status === 429 && attempt < maxRetries) {
+                    console.log(`⏳ Rate limit... Aguardando ${attempt * 3} segundos...`);
+                    await new Promise(resolve => setTimeout(resolve, attempt * 3000));
+                    continue;
+                  }
+                  
+                  throw new Error(`HuggingFace retornou erro ${response.status}: ${errorText.substring(0, 200)}`);
+                }
+                
+                const imageBuffer = await response.arrayBuffer();
+                console.log(`📦 Image buffer size: ${imageBuffer.byteLength} bytes`);
+                
+                if (imageBuffer.byteLength === 0) {
+                  throw new Error('Imagem vazia recebida do HuggingFace');
+                }
+                
+                const base64 = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)));
+                imageUrl = `data:image/png;base64,${base64}`;
+                console.log(`✅ Imagem HuggingFace gerada com sucesso (${(imageBuffer.byteLength / 1024).toFixed(1)} KB)`);
+                break; // Success!
+                
+              } catch (error: any) {
+                lastError = error;
+                console.error(`❌ Erro na tentativa ${attempt}:`, error.message);
+                
+                if (attempt === maxRetries) {
+                  throw error;
+                }
+                
+                console.log(`⏳ Aguardando ${attempt * 2} segundos antes de tentar novamente...`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+              }
+            }
+            
+            if (lastError && !imageUrl) {
+              throw lastError;
+            }
+          } catch (hfErr: any) {
             console.error(`❌ HuggingFace generation ${i + 1} failed:`, hfErr);
+            throw hfErr;
           }
         } else if (imageGenerator === 'pollinations') {
           try {
