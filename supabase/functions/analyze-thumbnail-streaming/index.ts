@@ -34,7 +34,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) throw new Error('Unauthorized');
 
-    const { imageBase64, modelingLevel, aiModel, customInstructions, includeText } = await req.json();
+    const { imageBase64, modelingLevel, aiModel, customInstructions, includeText, desiredText } = await req.json();
 
     if (!imageBase64) throw new Error('imageBase64 is required');
     if (!modelingLevel) throw new Error('modelingLevel is required');
@@ -43,6 +43,7 @@ serve(async (req) => {
       aiModel,
       modelingLevel,
       includeText: includeText ?? true,
+      hasDesiredText: !!desiredText,
       hasCustomInstructions: !!customInstructions,
       imageSize: imageBase64.length
     });
@@ -177,6 +178,11 @@ RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
     };
 
     let analysisPrompt = systemPrompts[modelingLevel as keyof typeof systemPrompts];
+    
+    // Adicionar texto desejado se fornecido
+    if (desiredText?.trim()) {
+      analysisPrompt += `\n\n🎯 TEXTO OBRIGATÓRIO NA IMAGEM GERADA:\nO usuário deseja que a thumbnail contenha o seguinte texto: "${desiredText.trim()}"\nIncorpore este texto exato no prompt de forma destacada, especificando fonte, tamanho, cor, posição e efeitos apropriados para máximo impacto visual.`;
+    }
     
     if (customInstructions?.trim()) {
       analysisPrompt += `\n\n📌 INSTRUÇÕES PERSONALIZADAS DO USUÁRIO:\n${customInstructions}`;

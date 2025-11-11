@@ -53,6 +53,7 @@ const PromptsThumbnail = () => {
   const [analysisComplete, setAnalysisComplete] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [includeTextMode, setIncludeTextMode] = useState(true);
+  const [desiredText, setDesiredText] = useState(''); // Texto que o usuário quer na imagem
   
   // PASSO 2: Geração
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
@@ -301,7 +302,8 @@ const PromptsThumbnail = () => {
           modelingLevel,
           aiModel: selectedAIModel,
           customInstructions,
-          includeText: includeTextMode
+          includeText: includeTextMode,
+          desiredText: desiredText.trim() // Passar o texto desejado
         }),
         signal: controller.signal // Adicionar signal para cancelamento
       });
@@ -798,6 +800,22 @@ const PromptsThumbnail = () => {
                     disabled={isAnalyzing}
                   />
                 </div>
+
+                {/* Campo de texto desejado (aparece apenas no modo Com Texto) */}
+                {includeTextMode && (
+                  <div className="space-y-2 mb-4">
+                    <Label>Texto Desejado na Imagem (Opcional)</Label>
+                    <Input
+                      value={desiredText}
+                      onChange={(e) => setDesiredText(e.target.value)}
+                      placeholder='Ex: "SEGREDOS DO EGITO" ou "TOP 10 FATOS"'
+                      disabled={isAnalyzing}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      💡 Digite o texto que você quer que apareça na thumbnail gerada
+                    </p>
+                  </div>
+                )}
 
                 {/* Botão de análise */}
                 <div className="flex gap-2">
