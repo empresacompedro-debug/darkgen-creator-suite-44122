@@ -215,12 +215,12 @@ FORMATO: Prompt conceitual (200-300 palavras) focando na IDEIA CENTRAL e possibi
             
             if (!fullText) throw new Error('No text generated from Gemini');
 
-            // Simular streaming palavra por palavra
-            const words = fullText.split(' ');
-            for (let i = 0; i < words.length; i++) {
-              const chunk = words[i] + (i < words.length - 1 ? ' ' : '');
+            // Simular streaming por sentenças (mais rápido e natural)
+            const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
+            for (let i = 0; i < sentences.length; i++) {
+              const chunk = sentences[i];
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
-              await new Promise(r => setTimeout(r, 30)); // 30ms delay
+              await new Promise(r => setTimeout(r, 50)); // 50ms entre sentenças
             }
           }
           // OpenAI streaming

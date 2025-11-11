@@ -47,6 +47,7 @@ const PromptsThumbnail = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedPrompt, setAnalyzedPrompt] = useState('');
   const [analysisComplete, setAnalysisComplete] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   
   // PASSO 2: Geração
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
@@ -264,6 +265,10 @@ const PromptsThumbnail = () => {
     setAnalysisComplete(false);
     setModelingResults([]);
 
+    // Criar AbortController para poder cancelar
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
       let imageBase64 = '';
       
@@ -288,7 +293,8 @@ const PromptsThumbnail = () => {
           modelingLevel,
           aiModel: selectedAIModel,
           customInstructions
-        })
+        }),
+        signal: controller.signal // Adicionar signal para cancelamento
       });
 
       if (!response.ok) {
@@ -316,6 +322,7 @@ const PromptsThumbnail = () => {
             if (dataStr === '[DONE]') {
               setAnalysisComplete(true);
               setIsAnalyzing(false);
+              setAbortController(null);
               toast({
                 title: '✅ Análise Concluída!',
                 description: 'Prompt gerado com sucesso. Clique em MODELAR para continuar.'
@@ -339,13 +346,31 @@ const PromptsThumbnail = () => {
       }
 
     } catch (error: any) {
-      console.error('❌ [Frontend] Analysis error:', error);
-      toast({
-        title: 'Erro na Análise',
-        description: error.message,
-        variant: 'destructive'
-      });
+      if (error.name === 'AbortError') {
+        console.log('🛑 [Frontend] Analysis canceled by user');
+        toast({
+          title: '⏸️ Análise Cancelada',
+          description: 'A geração do prompt foi interrompida.'
+        });
+      } else {
+        console.error('❌ [Frontend] Analysis error:', error);
+        toast({
+          title: 'Erro na Análise',
+          description: error.message,
+          variant: 'destructive'
+        });
+      }
     } finally {
+      setIsAnalyzing(false);
+      setAbortController(null);
+    }
+  };
+
+  // Função para cancelar a análise
+  const handleCancelAnalysis = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
       setIsAnalyzing(false);
     }
   };
@@ -720,21 +745,35 @@ const PromptsThumbnail = () => {
                 </div>
 
                 {/* Botão de análise */}
-                <Button 
-                  onClick={handleAnalyzeImage}
-                  disabled={isAnalyzing || !selectedImage}
-                  className="w-full mb-4"
-                  size="lg"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analisando...
-                    </>
-                  ) : (
-                    '🔍 Analisar Imagem e Gerar Prompt'
+                <div className="flex gap-2">
+                  <Button 
+                    onClick={handleAnalyzeImage}
+                    disabled={isAnalyzing || !selectedImage}
+                    className="flex-1"
+                    size="lg"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Analisando...
+                      </>
+                    ) : (
+                      '🔍 Analisar Imagem e Gerar Prompt'
+                    )}
+                  </Button>
+                  
+                  {isAnalyzing && (
+                    <Button 
+                      onClick={handleCancelAnalysis}
+                      variant="destructive"
+                      size="lg"
+                      className="px-8"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancelar
+                    </Button>
                   )}
-                </Button>
+                </div>
 
                 {/* Área de streaming do prompt */}
                 {(isAnalyzing || analyzedPrompt) && (
