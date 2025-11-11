@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { getApiKey } from '../_shared/get-api-key.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
@@ -160,16 +160,16 @@ CRÍTICO:
       const data = await response.json();
       aiResponse = data.content[0].text;
 
-    // 2. Gemini (API Key do Usuário) com Fallback Hierárquico para Vertex AI
+    // 2. Gemini (API Key do Usuário)
     } else if (aiModel.startsWith('gemini')) {
-      console.log('🔍 Buscando API Key do Gemini com fallback hierárquico...');
-      const keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+      console.log('🔍 Buscando API Key do Gemini...');
+      const keyData = await getApiKey(userId, 'gemini', supabaseClient);
       
       if (!keyData) {
-        throw new Error('❌ API Key do Gemini/Vertex AI não configurada. Configure em Configurações → API Keys.');
+        throw new Error('❌ API Key do Gemini não configurada. Configure em Configurações → API Keys.');
       }
       
-      console.log(`✅ Usando ${keyData.provider} (ID: ${keyData.keyId})`);
+      console.log(`✅ Usando Gemini (ID: ${keyData.keyId})`);
 
       const { url, headers, body } = await buildGeminiOrVertexRequest(
         keyData,

@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { getNextKeyRoundRobin, markKeyExhaustedAndGetNext } from './round-robin.ts';
+import { getNextVertexKeyRoundRobin, markVertexKeyExhaustedAndGetNext } from './round-robin-vertex.ts';
 
 export async function getApiKey(
   userId: string | undefined,
@@ -8,54 +9,58 @@ export async function getApiKey(
 ): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number; vertexConfig?: any } | null> {
   console.log(`🔍 [API Key] Fetching key for provider: ${provider}, userId: ${userId}`);
   
-  // Try to get user-specific API key using round-robin if userId is provided
+  // ✅ VERTEX AI: Usa tabela ISOLADA user_vertex_ai_keys
+  if (provider === 'vertex-ai') {
+    console.log(`🎯 [API Key] Vertex AI - buscando em tabela ISOLADA user_vertex_ai_keys`);
+    if (!userId) {
+      console.error('❌ [API Key] Vertex AI requer userId');
+      return null;
+    }
+    return await getNextVertexKeyRoundRobin(userId, supabaseClient);
+  }
+  
+  // ✅ GEMINI GRATUITO: SEMPRE usa env var global
+  if (provider === 'gemini') {
+    console.log(`🎯 [API Key] Gemini gratuito - usando GEMINI_API_KEY global`);
+    const globalKey = Deno.env.get('GEMINI_API_KEY');
+    if (globalKey) {
+      return { key: globalKey, keyId: 'global' };
+    }
+    console.error('❌ [API Key] GEMINI_API_KEY global não configurada');
+    return null;
+  }
+  
+  // ✅ OUTROS PROVIDERS (Claude, OpenAI, YouTube, etc.): tabela user_api_keys original
   if (userId) {
     try {
       const result = await getNextKeyRoundRobin(userId, provider, supabaseClient);
       
       if (result) {
-        console.log(`✅ [API Key] Using user key ${result.keyNumber}/${result.totalKeys} (Round-Robin)`);
-        
-        // Se for vertex-ai, buscar vertex_config da chave
-        if (provider === 'vertex-ai') {
-          const { data: keyData } = await supabaseClient
-            .from('user_api_keys')
-            .select('vertex_config')
-            .eq('id', result.keyId)
-            .single();
-          
-          if (keyData?.vertex_config) {
-            return { ...result, vertexConfig: keyData.vertex_config };
-          }
-        }
-        
+        console.log(`✅ [API Key] ${provider} - chave do usuário ${result.keyNumber}/${result.totalKeys}`);
         return result;
       }
     } catch (error: any) {
-      console.error(`❌ [API Key] Error fetching user key: ${error.message}`);
+      console.error(`❌ [API Key] Erro ao buscar chave do usuário: ${error.message}`);
     }
   }
 
-  // Fallback to global environment variable
-  console.log(`⚠️ [API Key] Falling back to global environment variable for ${provider}`);
+  // Fallback para env var global (Claude, OpenAI, etc.)
+  console.log(`⚠️ [API Key] Fallback para env var global de ${provider}`);
   const envVarMap: Record<string, string | undefined> = {
     youtube: Deno.env.get('YOUTUBE_API_KEY'),
-    gemini: Deno.env.get('GEMINI_API_KEY'),
     claude: Deno.env.get('ANTHROPIC_API_KEY'),
     openai: Deno.env.get('OPENAI_API_KEY'),
     kimi: Deno.env.get('KIMI_API_KEY'),
     huggingface: Deno.env.get('HUGGING_FACE_ACCESS_TOKEN')
   };
 
-  const envVar = envVarMap[provider];
-  const globalKey = envVar;
-
+  const globalKey = envVarMap[provider];
   if (globalKey) {
-    console.log(`✅ [API Key] Found global API key for ${provider}`);
+    console.log(`✅ [API Key] ${provider} - env var global encontrada`);
     return { key: globalKey, keyId: 'global' };
   }
 
-  console.error(`❌ [API Key] No API key found for ${provider}`);
+  console.error(`❌ [API Key] Nenhuma chave encontrada para ${provider}`);
   return null;
 }
 
@@ -73,7 +78,18 @@ export async function markApiKeyAsExhaustedAndRotate(
   }
 
   try {
-    // Use round-robin to get next key and mark current as exhausted
+    // ✅ VERTEX AI: usa rotação isolada
+    if (provider === 'vertex-ai') {
+      const result = await markVertexKeyExhaustedAndGetNext(userId, keyId, supabaseClient);
+      if (!result) {
+        console.error('❌ [Key Rotation] No more Vertex AI keys available');
+        return null;
+      }
+      console.log(`✅ [Key Rotation] Rotated to Vertex key ${result.keyNumber}/${result.totalKeys}`);
+      return { ...result, rotated: true };
+    }
+    
+    // ✅ OUTROS PROVIDERS: usa rotação original
     const result = await markKeyExhaustedAndGetNext(
       userId,
       keyId,
@@ -147,48 +163,9 @@ export async function markApiKeyAsExceeded(
   }
 }
 
-// Helper universal para executar requisições com rotação automática de API keys
-// Agora usa sistema Round-Robin para melhor distribuição de carga
-/**
- * Sistema de Fallback Hierárquico: Gemini (gratuito) → Vertex AI (pago)
- * Tenta usar Gemini primeiro, se não houver chaves ativas escalona para Vertex AI
- */
-export async function getApiKeyWithHierarchicalFallback(
-  userId: string | undefined,
-  preferredProvider: 'gemini' | 'vertex-ai',
-  supabaseClient: any
-): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number; provider: string; vertexConfig?: any } | null> {
-  console.log(`🎯 [Hierarchical Fallback] Buscando chave com preferência: ${preferredProvider}`);
-  
-  // 1. Tentar provider preferido (gemini)
-  if (preferredProvider === 'gemini') {
-    const geminiResult = await getApiKey(userId, 'gemini', supabaseClient);
-    
-    if (geminiResult) {
-      console.log(`✅ [Hierarchical Fallback] Usando Gemini (gratuito) - key ${geminiResult.keyNumber}/${geminiResult.totalKeys}`);
-      return { ...geminiResult, provider: 'gemini' };
-    }
-    
-    // 2. Se não houver chaves Gemini ativas, escalonar para Vertex AI
-    console.log('⚠️ [Hierarchical Fallback] Sem chaves Gemini ativas, escalando para Vertex AI (pago)...');
-    const vertexResult = await getApiKey(userId, 'vertex-ai', supabaseClient);
-    
-    if (vertexResult) {
-      console.log(`💰 [Hierarchical Fallback] Usando Vertex AI (pago) - key ${vertexResult.keyNumber}/${vertexResult.totalKeys}`);
-      return { ...vertexResult, provider: 'vertex-ai' };
-    }
-  } else {
-    // Se preferiu Vertex AI diretamente
-    const vertexResult = await getApiKey(userId, 'vertex-ai', supabaseClient);
-    if (vertexResult) {
-      console.log(`💰 [Hierarchical Fallback] Usando Vertex AI (pago) - key ${vertexResult.keyNumber}/${vertexResult.totalKeys}`);
-      return { ...vertexResult, provider: 'vertex-ai' };
-    }
-  }
-  
-  console.error('❌ [Hierarchical Fallback] Nenhuma chave disponível (Gemini ou Vertex AI)');
-  return null;
-}
+// ❌ FUNÇÃO REMOVIDA: getApiKeyWithHierarchicalFallback
+// Isolamento completo implementado: Gemini gratuito NUNCA usa Vertex AI
+// Vertex AI NUNCA usa Gemini gratuito
 
 export async function executeWithKeyRotation<T>(
   userId: string | undefined,
@@ -208,25 +185,14 @@ export async function executeWithKeyRotation<T>(
 
   while (currentAttempt < maxRetries) {
     try {
-      // Get current API key using Round-Robin (ou fallback hierárquico se for gemini/vertex-ai)
-      let keyData;
-      
-      if (provider === 'gemini') {
-        // Usar sistema hierárquico: Gemini → Vertex AI
-        keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
-        if (keyData) {
-          currentProvider = keyData.provider as any;
-        }
-      } else {
-        keyData = await getApiKey(userId, provider, supabaseClient);
-        if (keyData) {
-          keyData = { ...keyData, provider };
-        }
-      }
+      // ✅ ISOLAMENTO COMPLETO: cada provider usa sua própria fonte
+      const keyData = await getApiKey(userId, provider, supabaseClient);
       
       if (!keyData) {
         throw new Error(`No API key available for ${provider}`);
       }
+      
+      currentProvider = provider;
 
       currentKeyId = keyData.keyId;
       currentKeyNumber = keyData.keyNumber;

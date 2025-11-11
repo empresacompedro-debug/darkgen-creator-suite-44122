@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded } from '../_shared/get-api-key.ts';
 import { validateString, validateNumber, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 import { mapModelToProvider } from '../_shared/model-mapper.ts';
@@ -528,10 +528,10 @@ NÃO PARE até completar o roteiro inteiro!`;
         stream: true
       };
     } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
-      console.log(`🔑 Buscando API key para ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini com fallback'}`);
+      console.log(`🔑 Buscando API key para ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini'}`);
       const apiKeyResult = providerKey === 'vertex-ai'
         ? await getApiKey(userId, 'vertex-ai', supabaseClient)
-        : await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+        : await getApiKey(userId, 'gemini', supabaseClient);
       
       if (!apiKeyResult) {
         console.error('❌ ERRO: Nenhuma API key encontrada para Gemini/Vertex AI');

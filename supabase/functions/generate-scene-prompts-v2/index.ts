@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getApiKey, updateApiKeyUsage, getApiKeyWithHierarchicalFallback } from "../_shared/get-api-key.ts";
+import { getApiKey, updateApiKeyUsage } from "../_shared/get-api-key.ts";
 import { buildGeminiOrVertexRequest } from "../_shared/vertex-helpers.ts";
 import { mapModelToProvider } from "../_shared/model-mapper.ts";
 
@@ -74,7 +74,7 @@ serve(async (req) => {
     const keyData = providerKey === 'vertex-ai'
       ? await getApiKey(userId, 'vertex-ai', supabaseClient)
       : providerKey === 'gemini'
-      ? await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient)
+      ? await getApiKey(userId, 'gemini', supabaseClient)
       : await getApiKey(userId, providerKey, supabaseClient);
     
     if (!keyData) {

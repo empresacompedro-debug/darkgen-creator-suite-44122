@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded } from '../_shared/get-api-key.ts';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 import { mapModelToProvider } from '../_shared/model-mapper.ts';
@@ -123,7 +123,7 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
     } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
       const apiKeyResult = providerKey === 'vertex-ai'
         ? await getApiKey(userId, 'vertex-ai', supabaseClient)
-        : await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+        : await getApiKey(userId, 'gemini', supabaseClient);
       
       if (!apiKeyResult) {
         throw new Error('API key não configurada para Gemini/Vertex AI');

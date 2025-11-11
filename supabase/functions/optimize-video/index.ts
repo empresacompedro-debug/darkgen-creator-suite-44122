@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { validateString, validateUrl, validateOrThrow, ValidationException } from '../_shared/validation.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
-import { getApiKey, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
+import { getApiKey } from '../_shared/get-api-key.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
 
 const corsHeaders = {
@@ -270,17 +270,17 @@ async function callAI(prompt: string, model: string, userId: string | undefined,
     console.log('✅ [optimize-video] Resposta recebida com sucesso');
     return data.content[0].text;
   } else if (model.startsWith('gemini')) {
-    console.log('🔑 [optimize-video] Buscando API key do Gemini com fallback hierárquico...');
+    console.log('🔑 [optimize-video] Buscando API key do Gemini...');
     
     let keyData = null;
     if (userId) {
-      keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+      keyData = await getApiKey(userId, 'gemini', supabaseClient);
     }
     
     if (!keyData) {
       const globalKey = Deno.env.get('GEMINI_API_KEY');
       if (globalKey) {
-        keyData = { key: globalKey, provider: 'gemini', keyId: 'global' };
+        keyData = { key: globalKey, keyId: 'global' };
         console.log('✅ [optimize-video] Usando chave global Gemini');
       }
     }
@@ -290,7 +290,7 @@ async function callAI(prompt: string, model: string, userId: string | undefined,
       throw new Error('API key não configurada para Gemini. Por favor, adicione uma chave nas Configurações.');
     }
 
-    console.log(`✅ [optimize-video] Usando ${keyData.provider}`);
+    console.log(`✅ [optimize-video] Usando Gemini`);
     
     const { url, headers, body } = await buildGeminiOrVertexRequest(
       keyData,
@@ -299,7 +299,7 @@ async function callAI(prompt: string, model: string, userId: string | undefined,
       false
     );
 
-    console.log('🚀 [optimize-video] Enviando requisição para', keyData.provider);
+    console.log('🚀 [optimize-video] Enviando requisição para Gemini');
     const response = await fetch(url, {
       method: 'POST',
       headers,

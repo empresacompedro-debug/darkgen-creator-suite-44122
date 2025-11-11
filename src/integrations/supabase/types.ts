@@ -1316,6 +1316,45 @@ export type Database = {
           },
         ]
       }
+      user_vertex_ai_keys: {
+        Row: {
+          api_key_encrypted: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          last_used_at: string | null
+          priority: number | null
+          quota_status: Json | null
+          updated_at: string | null
+          user_id: string
+          vertex_config: Json
+        }
+        Insert: {
+          api_key_encrypted: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          priority?: number | null
+          quota_status?: Json | null
+          updated_at?: string | null
+          user_id: string
+          vertex_config: Json
+        }
+        Update: {
+          api_key_encrypted?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          priority?: number | null
+          quota_status?: Json | null
+          updated_at?: string | null
+          user_id?: string
+          vertex_config?: Json
+        }
+        Relationships: []
+      }
       video_optimizations: {
         Row: {
           ai_model: string | null
@@ -1519,6 +1558,17 @@ export type Database = {
           key_number: number
           priority: number
           total_keys: number
+        }[]
+      }
+      get_and_update_next_vertex_key: {
+        Args: { p_user_id: string }
+        Returns: {
+          encrypted_key: string
+          key_id: string
+          key_number: number
+          priority: number
+          total_keys: number
+          vertex_config: Json
         }[]
       }
       get_usage_stats_24h: { Args: { p_user_id: string }; Returns: Json }
