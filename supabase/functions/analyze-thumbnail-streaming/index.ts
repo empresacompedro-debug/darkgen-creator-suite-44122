@@ -13,8 +13,15 @@ serve(async (req) => {
   }
 
   try {
+    // Obter o token do Authorization header
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader) throw new Error('No authorization header');
+    if (!authHeader) {
+      console.error('❌ No authorization header');
+      return new Response(JSON.stringify({ error: 'No authorization header' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY');
@@ -24,10 +31,13 @@ serve(async (req) => {
         hasUrl: !!supabaseUrl, 
         hasKey: !!supabaseKey 
       });
-      throw new Error('Supabase configuration is missing');
+      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
-    // Criar cliente com o Authorization header do usuário
+    // Criar cliente Supabase com o token do usuário
     const supabaseClient = createClient(supabaseUrl, supabaseKey, {
       global: { 
         headers: { 
@@ -35,16 +45,20 @@ serve(async (req) => {
         } 
       },
       auth: {
-        persistSession: false
+        persistSession: false,
+        autoRefreshToken: false
       }
     });
 
-    // Verificar se o usuário está autenticado
+    // Validar o usuário
     const { data: { user }, error: authError } = await supabaseClient.auth.getUser();
     
     if (authError || !user) {
-      console.error('❌ Authentication failed:', authError?.message);
-      throw new Error('Unauthorized');
+      console.error('❌ Authentication failed:', authError?.message || 'User not found');
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
 
     console.log('✅ User authenticated:', user.id);
