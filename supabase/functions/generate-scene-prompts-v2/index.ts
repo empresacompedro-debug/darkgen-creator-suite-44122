@@ -27,11 +27,21 @@ serve(async (req) => {
     let userId: string | undefined;
     try {
       const token = authHeader?.replace("Bearer ", "");
+      console.log(`[generate-scene-prompts-v2] 🔐 Auth header present: ${!!authHeader}`);
+      console.log(`[generate-scene-prompts-v2] 🔐 Token extracted: ${token?.substring(0, 20)}...`);
+      
       if (token && token !== Deno.env.get("SUPABASE_ANON_KEY")) {
-        const { data: { user } } = await supabaseClient.auth.getUser(token);
+        const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+        if (userError) {
+          console.log(`[generate-scene-prompts-v2] ⚠️ Error getting user:`, userError);
+        }
         userId = user?.id;
+        console.log(`[generate-scene-prompts-v2] 👤 User ID: ${userId || 'undefined'}`);
+      } else {
+        console.log(`[generate-scene-prompts-v2] 🔑 Token is anon key, skipping user auth`);
       }
     } catch (e) {
+      console.log(`[generate-scene-prompts-v2] ⚠️ Auth error:`, e);
       console.log("No authenticated user, using global keys");
     }
 
@@ -181,13 +191,34 @@ REGRAS:
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       };
-      requestBody = {
-        model: aiModel,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 4096,
-        stream: true,
-      };
+      
+      // Determine if it's a newer model that doesn't support temperature
+      // GPT-4.1, GPT-5, O3, O4 models use max_completion_tokens and DON'T support temperature
+      const isNewerModel = aiModel.includes("gpt-4.1") || 
+                          aiModel.includes("gpt-5") || 
+                          aiModel.includes("o3-") || 
+                          aiModel.includes("o4-");
+      
+      if (isNewerModel) {
+        // Newer models: use max_completion_tokens, NO temperature
+        requestBody = {
+          model: aiModel,
+          messages: [{ role: "user", content: prompt }],
+          max_completion_tokens: 4096,
+          stream: true,
+        };
+        console.log(`[generate-scene-prompts-v2] Using newer model parameters (max_completion_tokens, no temperature)`);
+      } else {
+        // Legacy models (gpt-4o, gpt-4o-mini): use max_tokens and temperature
+        requestBody = {
+          model: aiModel,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_tokens: 4096,
+          stream: true,
+        };
+        console.log(`[generate-scene-prompts-v2] Using legacy model parameters (max_tokens, temperature)`);
+      }
     }
 
     console.log(`[generate-scene-prompts-v2] Chamando ${provider} API...`);
