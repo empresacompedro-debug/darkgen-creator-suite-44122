@@ -93,13 +93,24 @@ const PromptsParaCenas = () => {
       console.log('🚀 Iniciando geração de prompts...');
       setGenerationProgress(10);
 
+      // Get session token
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        toast({
+          title: "Erro de autenticação",
+          description: "Faça login para gerar prompts de cena",
+          variant: "destructive"
+        });
+        return;
+      }
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-scene-prompts-v2`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            "Authorization": `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({
             script,
