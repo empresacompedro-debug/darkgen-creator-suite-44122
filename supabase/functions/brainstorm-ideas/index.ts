@@ -31,6 +31,7 @@ serve(async (req) => {
     }
     
     console.log(`👤 [brainstorm-ideas] User ID: ${userId || 'Nenhum'}`);
+    console.log(`🔐 [brainstorm-ideas] Auth Header presente: ${!!authHeader}`);
     
     const body = await req.json();
     const battleMode = body.battleMode || false;
@@ -130,6 +131,11 @@ Responda de forma clara, organizada e valiosa.`;
       }
 
       if (availableModels.length === 0) {
+        console.log(`❌ [brainstorm-battle] Nenhum modelo disponível`);
+        console.log(`📋 [DEBUG] Modelos selecionados: ${selectedModels.join(', ')}`);
+        console.log(`👤 [DEBUG] User ID: ${userId || 'null'}`);
+        console.log(`🔍 [DEBUG] Verificar se as chaves estão salvas na tabela user_api_keys`);
+        
         return new Response(
           JSON.stringify({ 
             error: 'Nenhuma API key configurada. Verifique:\n1. Suas chaves em Configurações\n2. Se o campo "Provider" está correto (openai/claude/gemini)\n3. Se as chaves estão ativas'
