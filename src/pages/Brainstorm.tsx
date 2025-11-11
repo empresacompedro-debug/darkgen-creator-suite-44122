@@ -305,7 +305,15 @@ const Brainstorm = () => {
       <Card className="p-6 shadow-medium">
         <div className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="prompt">O que você quer descobrir?</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="prompt">O que você quer descobrir?</Label>
+              <span className={cn(
+                "text-sm",
+                prompt.length > 5000 ? "text-destructive font-semibold" : "text-muted-foreground"
+              )}>
+                {prompt.length}/5000
+              </span>
+            </div>
             <Textarea
               id="prompt"
               placeholder="Ex: Me dê 100 micronichos lucrativos de true crime para YouTube com CPM estimado..."
@@ -314,6 +322,11 @@ const Brainstorm = () => {
               rows={4}
               className="resize-none"
             />
+            {prompt.length > 5000 && (
+              <p className="text-sm text-destructive">
+                O prompt excede o limite de 5000 caracteres
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-between p-4 border rounded-lg bg-accent/10">
@@ -411,7 +424,7 @@ const Brainstorm = () => {
 
           <Button
             onClick={handleStreamIdeas}
-            disabled={isStreaming || !prompt.trim() || (battleMode && selectedAIs.length === 0)}
+            disabled={isStreaming || !prompt.trim() || prompt.length > 5000 || (battleMode && selectedAIs.length === 0)}
             className="w-full"
           >
             {isStreaming ? (
