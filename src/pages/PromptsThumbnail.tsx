@@ -524,8 +524,34 @@ const PromptsThumbnail = () => {
         }
       });
 
+      // Check for payment/credits error first
+      if (error && (error.message?.includes('402') || error.message?.includes('Créditos esgotados'))) {
+        toast({
+          title: '🍌 Créditos Esgotados',
+          description: 'Adicione créditos em Settings → Workspace → Usage para continuar usando o Nano Banana.',
+          variant: 'destructive',
+          duration: 8000
+        });
+        setIsGenerating(false);
+        return;
+      }
+      
       if (error) throw error;
-      if (!data.success) throw new Error(data.error || 'Erro ao gerar imagens');
+      
+      if (!data.success) {
+        // Check if the error is about credits
+        if (data.error?.includes('Créditos esgotados')) {
+          toast({
+            title: '🍌 Créditos Esgotados',
+            description: 'Adicione créditos em Settings → Workspace → Usage para continuar usando o Nano Banana.',
+            variant: 'destructive',
+            duration: 8000
+          });
+          setIsGenerating(false);
+          return;
+        }
+        throw new Error(data.error || 'Erro ao gerar imagens');
+      }
 
       console.log(`✅ [Frontend] Generated ${data.generatedImages.length} images`);
 
@@ -564,17 +590,21 @@ const PromptsThumbnail = () => {
       console.error('❌ [Frontend] Generation error:', error);
       
       let errorMessage = error.message || 'Erro desconhecido';
+      let errorTitle = 'Erro na Geração';
       
-      if (error.message?.includes('429')) {
-        errorMessage = '🍌 Nano Banana: Muitas requisições. Aguarde 1 minuto e tente novamente.';
-      } else if (error.message?.includes('402')) {
-        errorMessage = '🍌 Nano Banana: Créditos esgotados. Adicione créditos nas configurações.';
+      if (error.message?.includes('429') || error.message?.includes('Rate limit')) {
+        errorTitle = '⏱️ Muitas Requisições';
+        errorMessage = 'Aguarde 1 minuto antes de tentar novamente.';
+      } else if (error.message?.includes('Créditos esgotados')) {
+        errorTitle = '🍌 Créditos Esgotados';
+        errorMessage = 'Adicione créditos em Settings → Workspace → Usage.';
       }
       
       toast({
-        title: 'Erro na Geração',
+        title: errorTitle,
         description: errorMessage,
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 8000
       });
     } finally {
       setIsGenerating(false);

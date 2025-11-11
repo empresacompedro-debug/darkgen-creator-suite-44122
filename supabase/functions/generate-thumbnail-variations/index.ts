@@ -66,11 +66,15 @@ serve(async (req) => {
 
   } catch (error: any) {
     console.error('❌ [Generate Variations] Error:', error);
+    
+    // Return proper status code for payment errors
+    const status = error.message?.includes('Créditos esgotados') ? 402 : 500;
+    
     return new Response(JSON.stringify({
       success: false,
       error: error.message
     }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }
