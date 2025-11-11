@@ -1,7 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { executeWithKeyRotation } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,8 +14,27 @@ serve(async (req) => {
   }
 
   try {
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API key não configurada');
+    // Criar cliente Supabase
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: { Authorization: req.headers.get('Authorization')! },
+        },
+      }
+    );
+
+    // Extrair userId do JWT
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | undefined;
+    if (authHeader) {
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        userId = user?.id;
+      } catch (error) {
+        console.log('Sem usuário autenticado, usando chave global');
+      }
     }
 
     const { keyword, language = 'auto' } = await req.json();
@@ -57,37 +76,56 @@ Formato: ["sugestão 1", "sugestão 2", "sugestão 3", "sugestão 4", "sugestão
 
 Não inclua explicações, markdown ou texto adicional. APENAS o array JSON com sugestões em ${targetLanguage}.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.9,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 512,
+    console.log('🔑 Executando com rotação automática de chaves Gemini...');
+
+    // Usar executeWithKeyRotation para rotação automática
+    const generatedText = await executeWithKeyRotation(
+      userId,
+      'gemini',
+      supabaseClient,
+      async (apiKey: string) => {
+        console.log('📡 Chamando Gemini API...');
+        
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: prompt
+                }]
+              }],
+              generationConfig: {
+                temperature: 0.9,
+                topK: 40,
+                topP: 0.95,
+                maxOutputTokens: 512,
+              }
+            })
           }
-        })
+        );
+
+        const data = await response.json();
+
+        // Detectar erro de quota
+        if (!response.ok) {
+          const errorMsg = data.error?.message || '';
+          console.error('❌ Erro na API Gemini:', data);
+          
+          if (response.status === 429 || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+            throw new Error('QUOTA_EXCEEDED');
+          }
+          
+          throw new Error(errorMsg || 'Erro ao gerar sugestões');
+        }
+
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
       }
     );
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      console.error('Erro na API Gemini:', data);
-      throw new Error(data.error?.message || 'Erro ao gerar sugestões');
-    }
-
-    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
     console.log('Texto gerado:', generatedText);
 
     // Extrair JSON do texto gerado

@@ -45,11 +45,6 @@ serve(async (req) => {
     let YOUTUBE_API_KEY = youtubeKeyResult.key;
     let currentKeyId = youtubeKeyResult.keyId;
 
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-    if (!GEMINI_API_KEY) {
-      throw new Error('Gemini API key não configurada');
-    }
-
     const { 
       channelUrl, 
       daysFilter, 

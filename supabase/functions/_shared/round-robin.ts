@@ -21,7 +21,7 @@ interface ApiKey {
  */
 export async function getNextKeyRoundRobin(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
   supabaseClient: any
 ): Promise<{ key: string; keyId: string; keyNumber: number; totalKeys: number } | null> {
   console.log(`🔄 [Round-Robin] Buscando próxima chave ATÔMICA para provider: ${provider}`);
@@ -90,7 +90,7 @@ export async function getNextKeyRoundRobin(
 export async function markKeyExhaustedAndGetNext(
   userId: string | undefined,
   keyId: string,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
   supabaseClient: any
 ): Promise<{ key: string; keyId: string; keyNumber: number; totalKeys: number } | null> {
   console.log(`⚠️ [Round-Robin] Marcando chave ${keyId} como esgotada`);

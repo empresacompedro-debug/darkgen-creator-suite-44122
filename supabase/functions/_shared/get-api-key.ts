@@ -3,7 +3,7 @@ import { getNextKeyRoundRobin, markKeyExhaustedAndGetNext } from './round-robin.
 
 export async function getApiKey(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
   supabaseClient: any
 ): Promise<{ key: string; keyId: string; keyNumber?: number; totalKeys?: number } | null> {
   console.log(`🔍 [API Key] Fetching key for provider: ${provider}, userId: ${userId}`);
@@ -29,7 +29,8 @@ export async function getApiKey(
     gemini: Deno.env.get('GEMINI_API_KEY'),
     claude: Deno.env.get('ANTHROPIC_API_KEY'),
     openai: Deno.env.get('OPENAI_API_KEY'),
-    kimi: Deno.env.get('KIMI_API_KEY')
+    kimi: Deno.env.get('KIMI_API_KEY'),
+    huggingface: Deno.env.get('HUGGING_FACE_ACCESS_TOKEN')
   };
 
   const envVar = envVarMap[provider];
@@ -62,7 +63,7 @@ export async function markApiKeyAsExhaustedAndRotate(
     const result = await markKeyExhaustedAndGetNext(
       userId,
       keyId,
-      provider as 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
+      provider as 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
       supabaseClient
     );
 
@@ -136,7 +137,7 @@ export async function markApiKeyAsExceeded(
 // Agora usa sistema Round-Robin para melhor distribuição de carga
 export async function executeWithKeyRotation<T>(
   userId: string | undefined,
-  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
+  provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi' | 'huggingface',
   supabaseClient: any,
   executeRequest: (apiKey: string) => Promise<T>,
   maxRetries: number = 3

@@ -1,5 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { executeWithKeyRotation } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,6 +14,29 @@ serve(async (req) => {
   }
 
   try {
+    // Criar cliente Supabase
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      {
+        global: {
+          headers: { Authorization: req.headers.get('Authorization')! },
+        },
+      }
+    );
+
+    // Extrair userId do JWT
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | undefined;
+    if (authHeader) {
+      try {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        userId = user?.id;
+      } catch (error) {
+        console.log('Sem usuário autenticado, usando chaves globais');
+      }
+    }
+
     const { channels, targetChannel } = await req.json();
     
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
@@ -19,54 +44,85 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
 
-    const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
-    if (!YOUTUBE_API_KEY) {
-      throw new Error('YOUTUBE_API_KEY não configurada');
-    }
-
     console.log('🔍 Analisando padrão dos canais...');
     
-    // Buscar informações de cada canal
+    // Buscar informações de cada canal com rotação automática de chaves YouTube
     const channelInfos = [];
     
     for (const channelHandle of channels) {
       try {
-        // Buscar canal pelo handle
-        const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(channelHandle)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
-        const searchResponse = await fetch(searchUrl);
-        const searchData = await searchResponse.json();
-        
-        if (searchData.items && searchData.items.length > 0) {
-          const channelId = searchData.items[0].snippet.channelId;
-          
-          // Buscar detalhes do canal
-          const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails,statistics&id=${channelId}&key=${YOUTUBE_API_KEY}`;
-          const channelResponse = await fetch(channelUrl);
-          const channelData = await channelResponse.json();
-          
-          if (channelData.items && channelData.items.length > 0) {
-            const channel = channelData.items[0];
+        const channelInfo = await executeWithKeyRotation(
+          userId,
+          'youtube',
+          supabaseClient,
+          async (YOUTUBE_API_KEY: string) => {
+            // Buscar canal pelo handle
+            const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&q=${encodeURIComponent(channelHandle)}&maxResults=1&key=${YOUTUBE_API_KEY}`;
+            const searchResponse = await fetch(searchUrl);
+            const searchData = await searchResponse.json();
             
-            // Buscar vídeos recentes
-            const uploadsPlaylistId = channel.contentDetails.relatedPlaylists.uploads;
-            const videosUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=10&key=${YOUTUBE_API_KEY}`;
-            const videosResponse = await fetch(videosUrl);
-            const videosData = await videosResponse.json();
+            // Detectar erro de quota
+            if (!searchResponse.ok) {
+              const errorMsg = searchData.error?.message || '';
+              if (searchResponse.status === 403 || errorMsg.includes('quota') || errorMsg.includes('quotaExceeded')) {
+                throw new Error('QUOTA_EXCEEDED');
+              }
+              throw new Error(errorMsg || 'Erro ao buscar canal');
+            }
             
-            // Pegar títulos dos vídeos
-            const videoTitles = videosData.items?.map((v: any) => v.snippet.title) || [];
+            if (searchData.items && searchData.items.length > 0) {
+              const channelId = searchData.items[0].snippet.channelId;
+              
+              // Buscar detalhes do canal
+              const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails,statistics&id=${channelId}&key=${YOUTUBE_API_KEY}`;
+              const channelResponse = await fetch(channelUrl);
+              const channelData = await channelResponse.json();
+              
+              if (!channelResponse.ok) {
+                const errorMsg = channelData.error?.message || '';
+                if (channelResponse.status === 403 || errorMsg.includes('quota') || errorMsg.includes('quotaExceeded')) {
+                  throw new Error('QUOTA_EXCEEDED');
+                }
+                throw new Error(errorMsg || 'Erro ao buscar detalhes do canal');
+              }
+              
+              if (channelData.items && channelData.items.length > 0) {
+                const channel = channelData.items[0];
+                
+                // Buscar vídeos recentes
+                const uploadsPlaylistId = channel.contentDetails.relatedPlaylists.uploads;
+                const videosUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=10&key=${YOUTUBE_API_KEY}`;
+                const videosResponse = await fetch(videosUrl);
+                const videosData = await videosResponse.json();
+                
+                if (!videosResponse.ok) {
+                  const errorMsg = videosData.error?.message || '';
+                  if (videosResponse.status === 403 || errorMsg.includes('quota') || errorMsg.includes('quotaExceeded')) {
+                    throw new Error('QUOTA_EXCEEDED');
+                  }
+                }
+                
+                // Pegar títulos dos vídeos
+                const videoTitles = videosData.items?.map((v: any) => v.snippet.title) || [];
+                
+                return {
+                  handle: channelHandle,
+                  name: channel.snippet.title,
+                  description: channel.snippet.description,
+                  subscribers: parseInt(channel.statistics.subscriberCount || '0'),
+                  videoCount: parseInt(channel.statistics.videoCount || '0'),
+                  recentVideoTitles: videoTitles.slice(0, 5),
+                };
+              }
+            }
             
-            channelInfos.push({
-              handle: channelHandle,
-              name: channel.snippet.title,
-              description: channel.snippet.description,
-              subscribers: parseInt(channel.statistics.subscriberCount || '0'),
-              videoCount: parseInt(channel.statistics.videoCount || '0'),
-              recentVideoTitles: videoTitles.slice(0, 5),
-            });
-            
-            console.log(`✅ Informações coletadas: ${channel.snippet.title}`);
+            return null;
           }
+        );
+        
+        if (channelInfo) {
+          channelInfos.push(channelInfo);
+          console.log(`✅ Informações coletadas: ${channelInfo.name}`);
         }
       } catch (error) {
         console.error(`❌ Erro ao buscar ${channelHandle}:`, error);
