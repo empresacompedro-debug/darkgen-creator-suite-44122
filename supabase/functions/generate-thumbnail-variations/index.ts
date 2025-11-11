@@ -126,10 +126,11 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
 
   try {
-    // Chamar o novo endpoint Router diretamente (hf-inference)
+    // Primary: Router hf-inference models endpoint
     const apiUrl = `https://router.huggingface.co/hf-inference/models/${modelId}`;
+    console.log(`🔗 [HuggingFace] Calling: ${apiUrl}`);
 
-    const response = await fetch(apiUrl, {
+    let response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -145,9 +146,37 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
       })
     });
 
+    // Fallback: task-based endpoint if we receive the deprecation message or non-OK
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
+      console.warn(`⚠️ [HuggingFace] models endpoint failed: ${response.status} - ${errorText?.slice(0, 200)}`);
+      if (errorText?.includes('api-inference.huggingface.co is no longer supported')) {
+        console.log('↩️ [HuggingFace] Retrying via task endpoint');
+        response = await fetch('https://router.huggingface.co/hf-inference', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'image/png'
+          },
+          body: JSON.stringify({
+            task: 'text-to-image',
+            model: modelId,
+            inputs: prompt,
+            parameters: {
+              width: 1280,
+              height: 720
+            }
+          })
+        });
+      } else {
+        throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
+      }
+    }
+
+    if (!response.ok) {
+      const t = await response.text();
+      throw new Error(`HuggingFace error (task endpoint): ${response.status} - ${t}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -157,7 +186,7 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
     return `data:image/png;base64,${base64}`;
     
   } catch (error: any) {
-    console.error(`❌ [HuggingFace] Error via router:`, error?.message || error);
+    console.error(`❌ [HuggingFace] Router call failed:`, error?.message || error);
     throw new Error(`HuggingFace error: ${error?.message || 'Unknown error'}`);
   }
 }
