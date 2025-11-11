@@ -223,9 +223,18 @@ const PromptsParaCenas = () => {
       }
 
       setGenerationProgress(100);
+      
+      // Count scenes more flexibly
+      const sceneCount = Math.max(
+        accumulatedText.split(/\*\*Cena/gi).length - 1,  // **Cena
+        accumulatedText.split(/^Cena\s+\d+/gim).length - 1,  // Cena 1, Cena 2...
+        accumulatedText.split(/Scene\s+\d+/gi).length - 1,  // Scene 1, Scene 2...
+        1  // Minimum 1 if content exists
+      );
+      
       toast({
         title: "✅ Prompts Gerados!",
-        description: `${accumulatedText.split('**Cena').length - 1} cenas criadas com sucesso.`,
+        description: `${sceneCount} ${sceneCount === 1 ? 'cena criada' : 'cenas criadas'} com sucesso.`,
       });
 
     } catch (error: any) {
