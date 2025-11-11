@@ -281,8 +281,7 @@ const PromptsThumbnail = () => {
             customText,
             customInstructions,
             quantity: modelingQuantity,
-            provider,
-            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
+            imageGenerator: provider,
           }
         });
 
@@ -339,8 +338,7 @@ const PromptsThumbnail = () => {
             customText,
             customInstructions,
             quantity: modelingQuantity,
-            provider,
-            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
+            imageGenerator: provider,
           }
         });
 
