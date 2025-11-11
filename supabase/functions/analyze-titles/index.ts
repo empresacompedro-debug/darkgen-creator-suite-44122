@@ -92,41 +92,25 @@ serve(async (req) => {
         .limit(1)
         .single();
 
-      // Se não encontrou chave do usuário, fazer fallback para API gratuita do sistema
+      // SEM FALLBACK - se não tem chave, retorna erro
       if (keyError || !keyData) {
-        console.log(`⚠️ [analyze-titles] Nenhuma chave ${apiProvider.toUpperCase()} do usuário encontrada, usando fallback para Gemini gratuito`);
-        
-        // Usar chave Gemini gratuita do sistema
-        apiKey = Deno.env.get('GEMINI_API_KEY');
-        if (!apiKey) {
-          throw new Error('Nenhuma API key disponível. Configure sua chave Vertex AI ou Gemini nas configurações.');
-        }
-        
-        // Forçar uso do Gemini gratuito
-        apiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-      } else {
-
-        // Descriptografar chave
-        const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
-          p_encrypted: keyData.api_key_encrypted,
-          p_user_id: userId,
-        });
-
-        if (decErr || !decrypted) {
-          throw new Error(`Falha ao descriptografar chave ${apiProvider.toUpperCase()}`);
-        }
-
-        apiKey = decrypted as string;
-
-        // Se for Vertex AI, preparar configuração especial
-        if (provider === 'vertex-ai' && keyData.vertex_config) {
-          // A URL será construída pelo buildGeminiOrVertexRequest
-          apiUrl = ''; // Será sobrescrito
-        } else {
-          // API Gemini gratuita
-          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        }
+        throw new Error(`Configure sua chave ${apiProvider.toUpperCase()} nas configurações.`);
       }
+
+      // Descriptografar chave
+      const { data: decrypted, error: decErr } = await supabase.rpc('decrypt_api_key', {
+        p_encrypted: keyData.api_key_encrypted,
+        p_user_id: userId,
+      });
+
+      if (decErr || !decrypted) {
+        throw new Error(`Falha ao descriptografar chave ${apiProvider.toUpperCase()}`);
+      }
+
+      apiKey = decrypted as string;
+
+      // Preparar URL (será usado ou sobrescrito pelo helper)
+      apiUrl = '';
     } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
     } else {
@@ -259,56 +243,7 @@ IMPORTANTE:
       analysis = { markdownReport };
       
     } else if (provider === 'gemini' || provider === 'vertex-ai') {
-      // Se estamos usando fallback (apiUrl já está definido), fazer request simples
-      if (apiUrl) {
-        // Usando Gemini gratuito como fallback
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            safetySettings: [
-              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' }
-            ],
-            generationConfig: {
-              temperature: 0.8,
-              topP: 0.95
-            }
-          }),
-        });
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('Gemini API error:', errorText);
-          throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        const candidate = data?.candidates?.[0];
-        if (!candidate) {
-          throw new Error('Invalid Gemini API response: missing candidates');
-        }
-
-        let markdownReport = '';
-        const parts = candidate?.content?.parts;
-        if (Array.isArray(parts) && parts.length > 0) {
-          markdownReport = parts
-            .map((p: any) => (typeof p === 'string' ? p : (p?.text ?? '')))
-            .join('');
-        }
-
-        if (!markdownReport || !markdownReport.trim()) {
-          throw new Error('Gemini não retornou texto válido');
-        }
-
-        analysis = { markdownReport };
-      } else {
-        // Usar chave do usuário com Vertex AI ou Gemini
+      // Usar chave do usuário com Vertex AI ou Gemini via helper
         // Buscar configuração completa para Vertex AI
         let keyInfo: any = { key: apiKey };
         
@@ -426,9 +361,8 @@ IMPORTANTE:
           if (!analysis.markdownReport) {
             throw new Error('Gemini não retornou texto (possível bloqueio de segurança ou limite). Tente reduzir os dados ou refazer a análise em partes.');
           }
-        } else {
-          analysis = { markdownReport };
-        }
+      } else {
+        analysis = { markdownReport };
       }
     } else if (provider === 'openai') {
       apiUrl = 'https://api.openai.com/v1/chat/completions';
