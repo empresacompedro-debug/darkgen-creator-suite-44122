@@ -132,86 +132,62 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   if (isFluxModel && imageBase64) {
     console.log(`⚠️ [HuggingFace] FLUX models don't support img2img via API - using text-to-image`);
   } else if (useImg2Img) {
-    console.log(`🖼️ [HuggingFace] Using Image-to-Image mode with strength: ${strength}`);
+    console.log(`🖼️ [HuggingFace] Attempting Image-to-Image with guidance_scale instead of strength`);
   }
 
   try {
-    // Primary: Router hf-inference models endpoint
-    const apiUrl = `https://router.huggingface.co/hf-inference/models/${modelId}`;
+    const apiUrl = `https://api-inference.huggingface.co/models/${modelId}`;
     console.log(`🔗 [HuggingFace] Calling: ${apiUrl}`);
 
-    const requestBody: any = {
-      inputs: prompt,
-      parameters: {
-        width: 1280,
-        height: 720
-      }
-    };
+    let requestBody: any;
     
-    // Adicionar imagem e strength se for img2img
     if (useImg2Img) {
-      requestBody.image = imageBase64;
-      requestBody.parameters.strength = strength;
+      // Para img2img: FLUX não suporta, apenas text-to-image
+      // AVISO: A API REST do HuggingFace tem suporte limitado a img2img
+      // Os resultados podem não manter a composição da imagem original
+      const base64Clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+      
+      requestBody = {
+        inputs: {
+          prompt: prompt,
+          image: base64Clean,
+          num_inference_steps: 50,
+          guidance_scale: 15 - (strength * 10) // Inverter: strength baixo = guidance alto
+        }
+      };
+      
+      console.log(`📊 [HuggingFace] Using guidance_scale: ${requestBody.inputs.guidance_scale}`);
+    } else {
+      // Text-to-image padrão
+      requestBody = {
+        inputs: prompt
+      };
     }
 
-    let response = await fetch(apiUrl, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'image/png'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
     });
 
-    // Fallback: task-based endpoint if we receive the deprecation message or non-OK
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`⚠️ [HuggingFace] models endpoint failed: ${response.status} - ${errorText?.slice(0, 200)}`);
-      if (errorText?.includes('api-inference.huggingface.co is no longer supported')) {
-        console.log('↩️ [HuggingFace] Retrying via task endpoint');
-        const fallbackBody: any = {
-          task: useImg2Img ? 'image-to-image' : 'text-to-image',
-          model: modelId,
-          inputs: prompt,
-          parameters: {
-            width: 1280,
-            height: 720
-          }
-        };
-        
-        if (useImg2Img) {
-          fallbackBody.image = imageBase64;
-          fallbackBody.parameters.strength = strength;
-        }
-        
-        response = await fetch('https://router.huggingface.co/hf-inference', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'image/png'
-          },
-          body: JSON.stringify(fallbackBody)
-        });
-      } else {
-        throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
-      }
-    }
-
-    if (!response.ok) {
-      const t = await response.text();
-      throw new Error(`HuggingFace error (task endpoint): ${response.status} - ${t}`);
+      console.error(`❌ [HuggingFace] API error: ${response.status} - ${errorText?.slice(0, 500)}`);
+      throw new Error(`HuggingFace error: ${response.status} - ${errorText}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const base64 = arrayBufferToBase64(arrayBuffer);
     
-    console.log(`✅ [HuggingFace] Image generated successfully via router`);
+    console.log(`✅ [HuggingFace] Image generated successfully`);
     return `data:image/png;base64,${base64}`;
+
     
   } catch (error: any) {
-    console.error(`❌ [HuggingFace] Router call failed:`, error?.message || error);
+    console.error(`❌ [HuggingFace] Error:`, error?.message || error);
     throw new Error(`HuggingFace error: ${error?.message || 'Unknown error'}`);
   }
 }

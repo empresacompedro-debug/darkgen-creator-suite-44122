@@ -1381,11 +1381,22 @@ const PromptsThumbnail = () => {
               </Select>
             </div>
             
+            {/* Aviso sobre limitações da API */}
+            {selectedProvider === 'huggingface' && (
+              <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                  ⚠️ <strong>Limitação técnica:</strong> A API REST do Hugging Face tem suporte limitado para Image-to-Image.
+                  Os resultados podem não manter perfeitamente a composição da imagem original.
+                  Para melhores resultados, considere usar <strong>Pollinations</strong> que gera a partir do prompt detalhado da análise.
+                </p>
+              </div>
+            )}
+            
             {/* Controle de Similaridade (apenas HuggingFace + Stable Diffusion) */}
             {selectedProvider === 'huggingface' && !selectedModel.includes('flux') && (
               <div className="space-y-2">
                 <Label htmlFor="strength">
-                  Similaridade com Original: {strengthValue.toFixed(2)}
+                  Criatividade: {strengthValue.toFixed(2)}
                 </Label>
                 <Slider
                   id="strength"
@@ -1398,7 +1409,7 @@ const PromptsThumbnail = () => {
                 />
                 <p className="text-xs text-muted-foreground">
                   {strengthValue < 0.65 
-                    ? '🎯 Muito similar à original' 
+                    ? '🎯 Mais próximo do original (pode ter artefatos)' 
                     : strengthValue < 0.8 
                     ? '⚖️ Equilibrado' 
                     : '🎨 Mais criativo/diferente'}
@@ -1412,7 +1423,7 @@ const PromptsThumbnail = () => {
                 <p className="text-xs text-muted-foreground">
                   ℹ️ <strong>Nota:</strong> Modelos FLUX não suportam Image-to-Image via API. 
                   Será gerada uma nova imagem baseada no prompt detalhado.
-                  Para variações mais similares, use modelos SDXL.
+                  Para variações mais similares, use modelos SDXL ou Pollinations.
                 </p>
               </div>
             )}
