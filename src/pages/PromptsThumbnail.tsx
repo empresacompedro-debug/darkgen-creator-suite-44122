@@ -574,7 +574,7 @@ const PromptsThumbnail = () => {
 
         {/* TAB 3: MODELAGEM 2.0 COM STREAMING */}
         <TabsContent value="modeling">
-          <SubscriptionGuard featureName="Modelagem de Thumbnails">
+          <SubscriptionGuard toolName="Modelagem de Thumbnails">
             <div className="space-y-6">
               {/* PASSO 1: Análise com Streaming */}
               <Card className="p-6">
