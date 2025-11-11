@@ -662,6 +662,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
         // ============================================
         
         console.log('✅ [generate-scene-prompts] Streaming iniciado');
+        console.log(`📊 [DEBUG] Modelo: ${aiModel}, Script length: ${script.length}, Personagens: ${Array.isArray(characters) ? characters.length : 'N/A'}`);
         
         const stream = new ReadableStream({
           async start(controller) {
@@ -675,13 +676,23 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
 
             let lastHeartbeat = Date.now();
             const HEARTBEAT_INTERVAL = 10000; // 10s
+            let heartbeatTimer: number | null = null;
+            let streamClosed = false; // ✅ Flag de controle
 
-            // Heartbeat timer
-            const heartbeatTimer = setInterval(() => {
+            // Heartbeat timer com verificação de estado
+            heartbeatTimer = setInterval(() => {
+              if (streamClosed) return; // ✅ Prevenir enqueue após close
+              
               const now = Date.now();
               if (now - lastHeartbeat > HEARTBEAT_INTERVAL) {
-                controller.enqueue(`data: ${JSON.stringify({ heartbeat: true })}\n\n`);
-                lastHeartbeat = now;
+                try {
+                  controller.enqueue(`data: ${JSON.stringify({ heartbeat: true })}\n\n`);
+                  lastHeartbeat = now;
+                  console.log('💓 [generate-scene-prompts] Heartbeat enviado');
+                } catch (e) {
+                  console.error('⚠️ Heartbeat falhou (controller já fechado)');
+                  if (heartbeatTimer) clearInterval(heartbeatTimer);
+                }
               }
             }, HEARTBEAT_INTERVAL);
 
@@ -730,10 +741,26 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
               }
             } catch (streamError) {
               console.error('❌ [generate-scene-prompts] Erro no streaming:', streamError);
-              controller.enqueue(`data: ${JSON.stringify({ error: 'Erro no streaming' })}\n\n`);
+              if (!streamClosed) {
+                controller.enqueue(`data: ${JSON.stringify({ 
+                  error: 'Erro no streaming de dados' 
+                })}\n\n`);
+              }
             } finally {
-              clearInterval(heartbeatTimer);
-              controller.close();
+              streamClosed = true; // ✅ Marcar como fechado PRIMEIRO
+              if (heartbeatTimer) {
+                clearInterval(heartbeatTimer); // ✅ Limpar timer
+                heartbeatTimer = null;
+              }
+              // Aguardar microtask para garantir que timer não dispare
+              await new Promise(resolve => setTimeout(resolve, 0));
+              
+              try {
+                controller.close(); // ✅ Fechar apenas após limpar timer
+                console.log('✅ [generate-scene-prompts] Stream fechado corretamente');
+              } catch (e) {
+                console.error('⚠️ Controller já estava fechado');
+              }
             }
           }
         });

@@ -15,6 +15,7 @@ import { CharacterData } from "@/components/prompts/CharacterForm";
 import { cleanScriptMarkings, countWords } from "@/lib/scriptUtils";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
 import { AIModelSelector } from "@/components/subniche/AIModelSelector";
+import { cn } from "@/lib/utils";
 
 const PromptsParaCenas = () => {
   const { toast } = useToast();
@@ -162,17 +163,26 @@ const PromptsParaCenas = () => {
       const decoder = new TextDecoder();
       let accumulatedText = "";
       let lastChunkTime = Date.now();
-      const STREAM_TIMEOUT = 30000; // 30s sem dados = timeout
+      const STREAM_TIMEOUT = 180000; // ✅ 3 minutos (era 30s)
+      let warningShown = false;
 
-      // Timeout monitor
+      // ✅ Timeout com aviso progressivo
       const timeoutChecker = setInterval(() => {
         const timeSinceLastChunk = Date.now() - lastChunkTime;
+        
+        // ✅ Aviso aos 60s
+        if (timeSinceLastChunk > 60000 && !warningShown) {
+          console.log('⏳ Geração lenta detectada (60s). Aguardando...');
+          warningShown = true;
+        }
+        
+        // ✅ Abort apenas após 3 minutos
         if (timeSinceLastChunk > STREAM_TIMEOUT) {
-          console.error('⏱️ Stream timeout - sem dados por 30s');
+          console.error('⏱️ Stream timeout - sem dados por 3min');
           abortController.abort();
           clearInterval(timeoutChecker);
         }
-      }, 5000);
+      }, 10000); // Checar a cada 10s
 
       if (reader) {
         try {
@@ -191,13 +201,14 @@ const PromptsParaCenas = () => {
                   if (data.content) {
                     accumulatedText += data.content;
                     setGeneratedPrompts(accumulatedText);
-                    lastChunkTime = Date.now(); // Atualizar timestamp
+                    lastChunkTime = Date.now();
+                    console.log(`📥 Chunk recebido (${accumulatedText.length} chars acumulados)`);
                   } else if (data.error) {
                     throw new Error(data.error);
                   } else if (data.heartbeat) {
                     // Heartbeat do servidor - stream ainda ativo
                     lastChunkTime = Date.now();
-                    console.log('💓 Heartbeat recebido');
+                    console.log('💓 Heartbeat recebido - stream ativo');
                   }
                 } catch (e: any) {
                   if (e.message && !e.message.includes('JSON')) throw e;
@@ -233,18 +244,28 @@ const PromptsParaCenas = () => {
       console.error("Erro ao gerar prompts:", error);
       
       let errorMessage = error.message || "Erro desconhecido ao gerar prompts.";
+      let errorTitle = "Erro ao Gerar Prompts";
       
-      // Mensagens específicas
+      // ✅ Mensagens específicas e acionáveis
       if (error.name === 'AbortError') {
-        errorMessage = "Streaming interrompido (timeout de 30s sem resposta). Tente novamente.";
+        errorTitle = "⏱️ Timeout de Geração";
+        errorMessage = "A geração demorou mais de 3 minutos. Isso pode acontecer com roteiros muito longos. Tente:\n• Dividir o roteiro em partes menores\n• Usar o modo de geração 'Por Fala' ao invés de 'Automático'\n• Verificar se sua API key está ativa";
       } else if (errorMessage.includes('sessão expirou')) {
-        errorMessage = "Sua sessão expirou. Por favor, recarregue a página e faça login novamente.";
+        errorTitle = "🔐 Sessão Expirada";
+        errorMessage = "Por favor, recarregue a página (F5) e faça login novamente.";
+      } else if (errorMessage.includes('safety') || errorMessage.includes('bloqueado')) {
+        errorTitle = "🚫 Conteúdo Bloqueado";
+        errorMessage = "O modelo de IA bloqueou o conteúdo por políticas de segurança. Tente:\n• Ajustar o roteiro (remover termos sensíveis)\n• Usar outro modelo de IA (ex: trocar Claude por GPT)\n• Contatar suporte se o conteúdo é adequado";
+      } else if (errorMessage.includes('quota') || errorMessage.includes('429')) {
+        errorTitle = "⚠️ Limite de Quota";
+        errorMessage = "API key esgotada. Adicione outra chave em Configurações ou aguarde a renovação.";
       }
       
       toast({
-        title: "Erro ao Gerar Prompts",
+        title: errorTitle,
         description: errorMessage,
         variant: "destructive",
+        duration: 10000, // ✅ Mensagem mais longa para ler
       });
     } finally {
       setIsLoading(false);
@@ -596,11 +617,18 @@ const PromptsParaCenas = () => {
             label="Modelo de IA"
           />
 
-          <Button onClick={handleGeneratePrompts} disabled={isLoading} className="w-full">
+          <Button 
+            onClick={handleGeneratePrompts} 
+            disabled={isLoading} 
+            className={cn(
+              "w-full",
+              isLoading && "animate-pulse"
+            )}
+          >
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                <span className="animate-pulse">IA está escrevendo...</span>
+                ⚡ IA está escrevendo...
               </>
             ) : (
               <>
