@@ -1481,6 +1481,16 @@ export type Database = {
         Args: { p_provider: string; p_user_id: string }
         Returns: string
       }
+      get_and_update_next_key: {
+        Args: { p_provider: string; p_user_id: string }
+        Returns: {
+          encrypted_key: string
+          key_id: string
+          key_number: number
+          priority: number
+          total_keys: number
+        }[]
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

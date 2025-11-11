@@ -12,7 +12,8 @@ interface ApiKey {
 }
 
 /**
- * Busca a próxima chave disponível usando rotação circular
+ * Busca a próxima chave disponível usando rotação atômica (FOR UPDATE SKIP LOCKED)
+ * Previne race conditions em cenários de alta concorrência (1000+ req/dia)
  * @param userId - ID do usuário (opcional, para chaves específicas do usuário)
  * @param provider - Provider da API (youtube, gemini, etc)
  * @param supabaseClient - Cliente Supabase
@@ -23,7 +24,7 @@ export async function getNextKeyRoundRobin(
   provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'kimi',
   supabaseClient: any
 ): Promise<{ key: string; keyId: string; keyNumber: number; totalKeys: number } | null> {
-  console.log(`🔄 [Round-Robin] Buscando próxima chave para provider: ${provider}`);
+  console.log(`🔄 [Round-Robin] Buscando próxima chave ATÔMICA para provider: ${provider}`);
   console.log(`🔑 [DEBUG Round-Robin] userId recebido: ${userId} (tipo: ${typeof userId})`);
   
   if (!userId) {
@@ -31,65 +32,30 @@ export async function getNextKeyRoundRobin(
     return null;
   }
 
-  // Buscar todas as chaves ativas do usuário, ordenadas por priority
-  const { data: keys, error } = await supabaseClient
-    .from('user_api_keys')
-    .select('id, api_key_encrypted, priority, is_active, last_used_at')
-    .eq('user_id', userId)
-    .eq('api_provider', provider)
-    .eq('is_active', true)
-    .order('last_used_at', { ascending: true, nullsFirst: true })
-    .order('priority', { ascending: true })
-    .order('id', { ascending: true });
-
-  if (error) {
-    console.error('❌ [Round-Robin] Erro ao buscar chaves:', error);
-    return null;
-  }
-
-  if (!keys || keys.length === 0) {
-    console.log(`⚠️ [Round-Robin] Nenhuma chave ativa encontrada para ${provider}`);
-    return null;
-  }
-
-  console.log(`📊 [Round-Robin] ${keys.length} chaves ativas encontradas`);
-  if (keys[0]?.last_used_at) {
-    console.log(`🕒 [Round-Robin] Oldest last_used_at: ${keys[0].last_used_at}`);
-  } else {
-    console.log('🕒 [Round-Robin] Some keys have never been used (NULL last_used_at)');
-  }
-
-  // Determinar qual chave usar baseado em last_used_at (NULL primeiro), depois priority e id
-  // A chave que foi usada há mais tempo (ou nunca usada) será a próxima
-  let selectedKey: ApiKey = keys[0];
-  
-  // Calcular número de exibição estável com base em (priority ASC, id ASC)
-  const staticOrder = [...keys].sort((a: ApiKey, b: ApiKey) => {
-    if (a.priority !== b.priority) return a.priority - b.priority;
-    return a.id.localeCompare(b.id);
-  });
-  const displayIndex = staticOrder.findIndex(k => k.id === selectedKey.id);
-  const keyIndex = Math.max(displayIndex, 0);
-
-  console.log(`✅ [Round-Robin] Selecionada chave ${keyIndex + 1}/${keys.length} (priority: ${selectedKey.priority})`);
-
-  // Atualizar last_used_at da chave selecionada
-  const { error: updateError } = await supabaseClient
-    .from('user_api_keys')
-    .update({ last_used_at: new Date().toISOString() })
-    .eq('id', selectedKey.id);
-
-  if (updateError) {
-    console.error('⚠️ [Round-Robin] Erro ao atualizar last_used_at:', updateError);
-    // Continua mesmo com erro de atualização
-  }
-
-  // Descriptografar a chave
   try {
+    // 🔒 Chamada atômica à função RPC com lock (FOR UPDATE SKIP LOCKED)
+    // Isso garante 0% de race conditions mesmo em 1000+ requisições/dia
+    const { data: keyData, error } = await supabaseClient
+      .rpc('get_and_update_next_key', {
+        p_user_id: userId,
+        p_provider: provider
+      })
+      .single();
+
+    if (error || !keyData) {
+      console.log(`⚠️ [Round-Robin] Nenhuma chave ativa disponível para ${provider}`);
+      console.log('Error details:', error);
+      return null;
+    }
+
+    console.log(`📊 [Round-Robin] Chave selecionada: ${keyData.key_number}/${keyData.total_keys} (priority: ${keyData.priority})`);
+    console.log(`✅ [Round-Robin] last_used_at atualizado atomicamente (evita double update)`);
+
+    // Descriptografar a chave
     const { data: decryptedData, error: decryptError } = await supabaseClient.rpc(
       'decrypt_api_key',
       {
-        p_encrypted: selectedKey.api_key_encrypted,
+        p_encrypted: keyData.encrypted_key,
         p_user_id: userId
       }
     );
@@ -103,12 +69,12 @@ export async function getNextKeyRoundRobin(
 
     return {
       key: decryptedData,
-      keyId: selectedKey.id,
-      keyNumber: keyIndex + 1,
-      totalKeys: keys.length
+      keyId: keyData.key_id,
+      keyNumber: keyData.key_number,
+      totalKeys: keyData.total_keys
     };
   } catch (error) {
-    console.error('❌ [Round-Robin] Exceção ao descriptografar:', error);
+    console.error('❌ [Round-Robin] Exceção na rotação atômica:', error);
     return null;
   }
 }

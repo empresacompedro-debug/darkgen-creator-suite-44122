@@ -170,10 +170,9 @@ export async function executeWithKeyRotation<T>(
       // Execute the request
       const result = await executeRequest(keyData.key);
       
-      // Update key usage on success
-      if (userId && currentKeyId && currentKeyId !== 'global') {
-        await updateApiKeyUsage(userId, provider, supabaseClient, currentKeyId);
-      }
+      // ✅ REMOVIDO: Double update de last_used_at
+      // O update já foi feito atomicamente no get_and_update_next_key()
+      // Manter updateApiKeyUsage aqui causava 2 updates desnecessários
       
       console.log(`✅ [Execute] Request successful with key ${currentKeyNumber || 'global'}/${totalKeys || '?'}`);
       return result;
