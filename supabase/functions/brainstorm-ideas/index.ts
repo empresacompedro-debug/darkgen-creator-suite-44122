@@ -156,7 +156,8 @@ Responda de forma clara, organizada e valiosa.`;
             }
           } else {
             // Para Claude e Gemini, usar getApiKey helper
-            const keyData = await getApiKey(userId || undefined, providerKey, supabase);
+            console.log(`🔍 [DEBUG brainstorm] Buscando chave para ${modelId}, provider: ${providerKey}`);
+            const keyData = await getApiKey(userId ?? undefined, providerKey, supabase);
             if (keyData) {
               availableModels.push({
                 name: modelId,
@@ -177,7 +178,7 @@ Responda de forma clara, organizada e valiosa.`;
       if (availableModels.length === 0) {
         return new Response(
           JSON.stringify({ 
-            error: 'Nenhuma API key configurada para os modelos selecionados. Configure suas chaves de API nas configurações.' 
+            error: 'Nenhuma API key configurada. Verifique:\n1. Suas chaves em Configurações\n2. Se o campo "Provider" está correto (openai/claude/gemini)\n3. Se as chaves estão ativas'
           }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );

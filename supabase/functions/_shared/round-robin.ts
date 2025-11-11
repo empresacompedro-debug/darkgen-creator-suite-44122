@@ -24,6 +24,12 @@ export async function getNextKeyRoundRobin(
   supabaseClient: any
 ): Promise<{ key: string; keyId: string; keyNumber: number; totalKeys: number } | null> {
   console.log(`🔄 [Round-Robin] Buscando próxima chave para provider: ${provider}`);
+  console.log(`🔑 [DEBUG Round-Robin] userId recebido: ${userId} (tipo: ${typeof userId})`);
+  
+  if (!userId) {
+    console.log('⚠️ [Round-Robin] userId é null/undefined, sem chaves do usuário');
+    return null;
+  }
 
   // Buscar todas as chaves ativas do usuário, ordenadas por priority
   const { data: keys, error } = await supabaseClient

@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { UserManual } from "@/components/thumbnail-prompt/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { ModelSelector } from "@/components/image-generator/ModelSelector";
 
 const PromptsThumbnail = () => {
   const { toast } = useToast();
@@ -43,7 +44,10 @@ const PromptsThumbnail = () => {
   const [includeText, setIncludeText] = useState(false);
   const [customInstructions, setCustomInstructions] = useState('');
   const [modelingQuantity, setModelingQuantity] = useState(2);
-  const [imageGenerator, setImageGenerator] = useState('lovable-ai');
+  const [provider, setProvider] = useState<"pollinations" | "huggingface">("pollinations");
+  const [imageModel, setImageModel] = useState("pollinations");
+  const [huggingfaceModel, setHuggingfaceModel] = useState("flux-schnell");
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const [isModeling, setIsModeling] = useState(false);
   const [modelingResults, setModelingResults] = useState<any>(null);
   const [modelingHistory, setModelingHistory] = useState<any[]>([]);
@@ -277,7 +281,8 @@ const PromptsThumbnail = () => {
             customText,
             customInstructions,
             quantity: modelingQuantity,
-            imageGenerator,
+            provider,
+            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
           }
         });
 
@@ -296,7 +301,7 @@ const PromptsThumbnail = () => {
           include_text: includeText,
           custom_instructions: customInstructions,
           quantity: modelingQuantity,
-          image_generator: imageGenerator,
+          image_generator: provider,
           generated_images: data.generatedImages,
           ai_analysis: data.analysis,
           ai_model: 'google/gemini-2.5-flash',
@@ -334,7 +339,8 @@ const PromptsThumbnail = () => {
             customText,
             customInstructions,
             quantity: modelingQuantity,
-            imageGenerator,
+            provider,
+            imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
           }
         });
 
@@ -353,7 +359,7 @@ const PromptsThumbnail = () => {
           include_text: includeText,
           custom_instructions: customInstructions,
           quantity: modelingQuantity,
-          image_generator: imageGenerator,
+          image_generator: provider,
           generated_images: data.generatedImages,
           ai_analysis: data.analysis,
           ai_model: 'google/gemini-2.5-flash',
@@ -697,20 +703,28 @@ const PromptsThumbnail = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Gerador de Imagem</Label>
-                  <Select value={imageGenerator} onValueChange={setImageGenerator}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  <Label>Provider de Geração</Label>
+                  <Select value={provider} onValueChange={(v: any) => setProvider(v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="lovable-ai">Lovable AI ⭐ (Recomendado)</SelectItem>
-                      <SelectItem value="nano-banana">Nano Banana 🍌</SelectItem>
-                      <SelectItem value="whisk">Whisk (Requer Cookie)</SelectItem>
-                      <SelectItem value="imagefx">ImageFX (Requer Cookie)</SelectItem>
+                      <SelectItem value="pollinations">Pollinations.ai (Gratuito)</SelectItem>
+                      <SelectItem value="huggingface">HuggingFace (Requer Token)</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Modelo de Imagem</Label>
+                  <Button 
+                    variant="outline" 
+                    className="w-full justify-between"
+                    onClick={() => setShowModelSelector(true)}
+                  >
+                    <span>{provider === 'huggingface' ? huggingfaceModel : imageModel}</span>
+                    <ImageIcon className="h-4 w-4 ml-2" />
+                  </Button>
                   <p className="text-xs text-muted-foreground">
-                    ℹ️ Todos os geradores suportam modelagem idêntica, parecida e conceitual
+                    {provider === 'pollinations' ? '🆓 Gratuito, sem limites' : '🔑 Requer token HuggingFace'}
                   </p>
                 </div>
 
@@ -908,6 +922,26 @@ const PromptsThumbnail = () => {
                       </Card>
                     ))}
                   </div>
+
+                  <Dialog open={showModelSelector} onOpenChange={setShowModelSelector}>
+                    <DialogContent className="max-w-4xl">
+                      <DialogHeader>
+                        <DialogTitle>Selecionar Modelo de Imagem</DialogTitle>
+                      </DialogHeader>
+                      <ModelSelector
+                        value={provider === 'huggingface' ? huggingfaceModel : imageModel}
+                        onChange={(v) => {
+                          if (provider === 'huggingface') {
+                            setHuggingfaceModel(v);
+                          } else {
+                            setImageModel(v);
+                          }
+                          setShowModelSelector(false);
+                        }}
+                        provider={provider}
+                      />
+                    </DialogContent>
+                  </Dialog>
 
                   <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
                     <DialogContent className="max-w-4xl">

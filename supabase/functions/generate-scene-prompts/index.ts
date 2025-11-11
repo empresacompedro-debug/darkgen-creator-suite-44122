@@ -443,7 +443,9 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
         
         if (aiModel.startsWith('claude')) {
           // Tentar chave do usuário primeiro, depois global
-          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'claude', supabase);
+          console.log('🔑 Buscando chaves Claude do usuário...');
+          console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'claude', supabase);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -477,7 +479,9 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           
         } else if (aiModel.startsWith('gemini')) {
           // Tentar chave do usuário primeiro, depois global
-          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'gemini', supabase);
+          console.log('🔑 Buscando chaves Gemini do usuário...');
+          console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'gemini', supabase);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -502,7 +506,9 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
           
         } else if (aiModel.startsWith('gpt')) {
           // Tentar chave do usuário primeiro, depois global
-          const keyInfo = await getNextKeyRoundRobin(userId || undefined, 'openai', supabase);
+          console.log('🔑 Buscando chaves OpenAI do usuário...');
+          console.log(`🔑 [DEBUG] userId antes de chamar getNextKeyRoundRobin: ${userId} (tipo: ${typeof userId})`);
+          const keyInfo = await getNextKeyRoundRobin(userId ?? undefined, 'openai', supabase);
           
           if (keyInfo) {
             apiKey = keyInfo.key;
@@ -564,7 +570,7 @@ GENERATE THE PROMPTS NOW following this structure RIGOROUSLY and applying ${opti
             const provider = aiModel.startsWith('claude') ? 'claude' : 
                            aiModel.startsWith('gemini') ? 'gemini' : 'openai';
             
-            const nextKey = await markKeyExhaustedAndGetNext(userId || undefined, keyId, provider, supabase);
+            const nextKey = await markKeyExhaustedAndGetNext(userId ?? undefined, keyId, provider, supabase);
             
             if (nextKey) {
               console.log(`✅ [generate-scene-prompts] Nova chave disponível (${nextKey.keyNumber}/${nextKey.totalKeys})`);

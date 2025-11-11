@@ -60,7 +60,11 @@ const GeradorImagens = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   
-  const [generatedImages, setGeneratedImages] = useState<Array<{ url: string; sceneIndex?: number }>>([]);
+  const [generatedImages, setGeneratedImages] = useState<Array<{ 
+    id?: string;
+    url: string; 
+    sceneIndex?: number;
+  }>>([]);
   const [savedScenePrompts, setSavedScenePrompts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -107,6 +111,7 @@ const GeradorImagens = () => {
       if (error) throw error;
       if (data) {
         setGeneratedImages(data.map(img => ({
+          id: img.id,
           url: img.image_url,
           sceneIndex: typeof img.settings === 'object' && img.settings !== null && 'sceneIndex' in img.settings 
             ? (img.settings as any).sceneIndex 
@@ -369,22 +374,38 @@ const GeradorImagens = () => {
               newImages.push(imageUrl);
               
               // Atualizar galeria imediatamente
-              setGeneratedImages(prev => [...prev, { url: imageUrl, sceneIndex: sceneIndex + 1 }]);
+              setGeneratedImages(prev => [...prev, { id: undefined, url: imageUrl, sceneIndex: sceneIndex + 1 }]);
               
               // Salvar imagem no banco imediatamente
               try {
-                await supabase.from('generated_images').insert({
-                  user_id: user.id,
-                  image_url: imageUrl,
-                  prompt: scenes[sceneIndex],
-                  settings: {
-                    aspectRatio,
-                    imageModel,
-                    promptStyle,
-                    sceneIndex: sceneIndex + 1,
-                    imageIndex: imgIndex + 1
-                  }
-                });
+                const { data: savedImage, error: dbError } = await supabase
+                  .from('generated_images')
+                  .insert({
+                    user_id: user.id,
+                    image_url: imageUrl,
+                    prompt: scenes[sceneIndex],
+                    settings: {
+                      aspectRatio,
+                      imageModel,
+                      promptStyle,
+                      sceneIndex: sceneIndex + 1,
+                      imageIndex: imgIndex + 1
+                    }
+                  })
+                  .select('id')
+                  .single();
+                
+                if (!dbError && savedImage) {
+                  // Atualizar galeria com ID
+                  setGeneratedImages(prev => {
+                    const updated = [...prev];
+                    const lastIndex = updated.length - 1;
+                    if (lastIndex >= 0) {
+                      updated[lastIndex] = { ...updated[lastIndex], id: savedImage.id };
+                    }
+                    return updated;
+                  });
+                }
               } catch (dbError) {
                 console.error('Erro ao salvar imagem no banco:', dbError);
               }
@@ -671,14 +692,14 @@ const GeradorImagens = () => {
                   >
                     <Download className="h-4 w-4" />
                   </Button>
-                  <Button 
-                    size="icon" 
-                    variant="destructive"
-                    onClick={() => handleDeleteImage(image.url)}
-                    className="h-8 w-8"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                     <Button 
+                       size="icon" 
+                       variant="destructive"
+                       onClick={() => handleDeleteImage(image.url)}
+                       className="h-8 w-8"
+                     >
+                       <X className="h-4 w-4" />
+                     </Button>
                 </div>
                 {image.sceneIndex && (
                   <div className="mt-2 text-center text-sm text-muted-foreground">
