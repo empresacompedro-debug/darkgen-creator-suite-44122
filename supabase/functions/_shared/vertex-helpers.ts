@@ -50,8 +50,17 @@ export async function buildGeminiOrVertexRequest(
       }
     };
   } else {
-    // Gemini (free) request
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?${stream ? 'alt=sse&' : ''}key=${keyData.key}`;
+    // Gemini (public) request - use v1 and map 2.5 -> 1.5 for compatibility
+    const modelMapping: Record<string, string> = {
+      'gemini-2.5-pro': 'gemini-1.5-pro',
+      'gemini-2.5-flash': 'gemini-1.5-flash',
+      'gemini-2.5-flash-lite': 'gemini-1.5-flash',
+      'gemini-1.5-pro': 'gemini-1.5-pro',
+      'gemini-1.5-flash': 'gemini-1.5-flash',
+    };
+    const geminiModel = modelMapping[model] || 'gemini-1.5-flash';
+
+    const url = `https://generativelanguage.googleapis.com/v1/models/${geminiModel}:${stream ? 'streamGenerateContent' : 'generateContent'}?${stream ? 'alt=sse&' : ''}key=${keyData.key}`;
     
     return {
       url,
