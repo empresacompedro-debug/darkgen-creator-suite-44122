@@ -35,6 +35,12 @@ const PromptsThumbnail = () => {
   const [includePhrase, setIncludePhrase] = useState(false);
   const [aiModel, setAiModel] = useState("gemini-2.5-flash");
   const [generatedPrompt, setGeneratedPrompt] = useState("");
+  
+  // Novos parâmetros para sistema avançado
+  const [thumbnailType, setThumbnailType] = useState<'faceless' | 'with-face' | 'mixed' | 'auto'>('auto');
+  const [detailLevel, setDetailLevel] = useState<'basic' | 'advanced' | 'expert'>('expert');
+  const [includeColorPsychology, setIncludeColorPsychology] = useState(true);
+  const [includeTypographyStack, setIncludeTypographyStack] = useState(true);
 
   // NOVO: Estados para o sistema de 2 passos (Tab 3)
   const [competitorImages, setCompetitorImages] = useState<ExtractedThumbnail[]>([]);
@@ -144,7 +150,17 @@ const PromptsThumbnail = () => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke('generate-thumbnail-prompt', {
-        body: { videoTitle, platform, language, includePhrase, aiModel }
+        body: { 
+          videoTitle, 
+          platform, 
+          language, 
+          includePhrase, 
+          aiModel,
+          thumbnailType,
+          detailLevel,
+          includeColorPsychology,
+          includeTypographyStack
+        }
       });
 
       if (error) throw error;
@@ -660,6 +676,74 @@ const PromptsThumbnail = () => {
                     <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* Configurações Avançadas */}
+              <div className="border-t pt-4 space-y-4">
+                <h3 className="font-semibold text-sm text-muted-foreground">⚙️ Configurações Avançadas</h3>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Tipo de Thumbnail</Label>
+                    <Select value={thumbnailType} onValueChange={(v: any) => setThumbnailType(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">🤖 Auto (IA escolhe)</SelectItem>
+                        <SelectItem value="faceless">🎨 Faceless (sem rosto)</SelectItem>
+                        <SelectItem value="with-face">😮 Com Rosto</SelectItem>
+                        <SelectItem value="mixed">🔀 Misto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Nível de Detalhe</Label>
+                    <Select value={detailLevel} onValueChange={(v: any) => setDetailLevel(v)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="basic">📝 Básico</SelectItem>
+                        <SelectItem value="advanced">📊 Avançado</SelectItem>
+                        <SelectItem value="expert">🎯 Expert (Máximo)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <div className="flex flex-col space-y-1">
+                    <Label htmlFor="color-psychology" className="text-sm font-medium">
+                      Psicologia de Cores
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Incluir análise emocional das cores com hex codes e percentuais
+                    </p>
+                  </div>
+                  <Switch
+                    id="color-psychology"
+                    checked={includeColorPsychology}
+                    onCheckedChange={setIncludeColorPsychology}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <div className="flex flex-col space-y-1">
+                    <Label htmlFor="typography-stack" className="text-sm font-medium">
+                      Stack de Tipografia
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Incluir efeitos de texto em camadas (strokes, shadows, glows)
+                    </p>
+                  </div>
+                  <Switch
+                    id="typography-stack"
+                    checked={includeTypographyStack}
+                    onCheckedChange={setIncludeTypographyStack}
+                  />
+                </div>
               </div>
 
               <Button onClick={handleGeneratePrompt} disabled={isLoading} className="w-full">
