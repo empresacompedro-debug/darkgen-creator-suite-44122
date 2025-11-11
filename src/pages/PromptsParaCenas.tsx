@@ -131,11 +131,13 @@ const PromptsParaCenas = () => {
 
       setGenerationProgress(20);
 
+      let chunkCount = 0;
+      
       while (true) {
         const { done, value } = await reader.read();
 
         if (done) {
-          console.log('✅ Stream concluído');
+          console.log(`✅ Stream concluído - Total de ${chunkCount} chunks recebidos`);
           break;
         }
 
@@ -162,16 +164,18 @@ const PromptsParaCenas = () => {
               const chunk = parsed.text || parsed.content || '';
               
               if (chunk) {
+                chunkCount++;
                 accumulatedText += chunk;
                 setGeneratedPrompts(accumulatedText);
                 setGenerationProgress(prev => Math.min(prev + 1, 90));
+                console.log(`📥 Chunk #${chunkCount} recebido (${chunk.length} chars): "${chunk.substring(0, 30)}${chunk.length > 30 ? '...' : ''}" | Total acumulado: ${accumulatedText.length} chars`);
               }
               
               if (parsed.heartbeat) {
                 console.log('💓 Heartbeat recebido');
               }
             } catch (parseError) {
-              console.error('Erro ao parsear JSON:', parseError, 'Data:', data);
+              console.error('❌ Erro ao parsear JSON:', parseError, 'Data:', data);
             }
           }
         }

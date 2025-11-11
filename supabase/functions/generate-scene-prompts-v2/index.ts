@@ -228,12 +228,19 @@ REGRAS:
       async start(controller) {
         const reader = apiResponse.body!.getReader();
         const decoder = new TextDecoder();
+        const encoder = new TextEncoder();
         let buffer = "";
+        let totalChunks = 0;
+
+        console.log(`[generate-scene-prompts-v2] ✅ Iniciando streaming de ${provider}...`);
 
         try {
           while (true) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+              console.log(`[generate-scene-prompts-v2] 🏁 Stream do ${provider} concluído. Total de chunks enviados: ${totalChunks}`);
+              break;
+            }
 
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
@@ -251,10 +258,14 @@ REGRAS:
                   try {
                     const parsed = JSON.parse(data);
                     if (parsed.type === "content_block_delta" && parsed.delta?.text) {
-                      controller.enqueue(`data: ${JSON.stringify({ text: parsed.delta.text })}\n\n`);
+                      const textChunk = parsed.delta.text;
+                      const message = `data: ${JSON.stringify({ text: textChunk })}\n\n`;
+                      controller.enqueue(encoder.encode(message));
+                      totalChunks++;
+                      console.log(`[generate-scene-prompts-v2] 📤 Claude chunk #${totalChunks}: "${textChunk.substring(0, 50)}${textChunk.length > 50 ? '...' : ''}"`);
                     }
                   } catch (e) {
-                    console.error("Parse error (Claude):", e);
+                    console.error("[generate-scene-prompts-v2] ❌ Parse error (Claude):", e);
                   }
                 }
               } else if (provider === "gemini") {
@@ -264,10 +275,13 @@ REGRAS:
                     const parsed = JSON.parse(data);
                     const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (text) {
-                      controller.enqueue(`data: ${JSON.stringify({ text })}\n\n`);
+                      const message = `data: ${JSON.stringify({ text })}\n\n`;
+                      controller.enqueue(encoder.encode(message));
+                      totalChunks++;
+                      console.log(`[generate-scene-prompts-v2] 📤 Gemini chunk #${totalChunks}: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
                     }
                   } catch (e) {
-                    console.error("Parse error (Gemini):", e);
+                    console.error("[generate-scene-prompts-v2] ❌ Parse error (Gemini):", e);
                   }
                 }
               } else {
@@ -280,17 +294,22 @@ REGRAS:
                     const parsed = JSON.parse(data);
                     const text = parsed.choices?.[0]?.delta?.content;
                     if (text) {
-                      controller.enqueue(`data: ${JSON.stringify({ text })}\n\n`);
+                      const message = `data: ${JSON.stringify({ text })}\n\n`;
+                      controller.enqueue(encoder.encode(message));
+                      totalChunks++;
+                      console.log(`[generate-scene-prompts-v2] 📤 OpenAI chunk #${totalChunks}: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
                     }
                   } catch (e) {
-                    console.error("Parse error (OpenAI):", e);
+                    console.error("[generate-scene-prompts-v2] ❌ Parse error (OpenAI):", e);
                   }
                 }
               }
             }
           }
 
-          controller.enqueue(`data: [DONE]\n\n`);
+          const doneMessage = encoder.encode(`data: [DONE]\n\n`);
+          controller.enqueue(doneMessage);
+          console.log(`[generate-scene-prompts-v2] ✅ Enviado [DONE]`);
           
           // Update API key usage
           if (userId && keyId && keyId !== 'global') {
@@ -298,9 +317,9 @@ REGRAS:
           }
           
           controller.close();
-          console.log(`[generate-scene-prompts-v2] Stream finalizado com sucesso`);
+          console.log(`[generate-scene-prompts-v2] ✅ Stream finalizado com sucesso - ${totalChunks} chunks enviados`);
         } catch (error) {
-          console.error(`[generate-scene-prompts-v2] Erro no streaming:`, error);
+          console.error(`[generate-scene-prompts-v2] ❌ Erro no streaming:`, error);
           controller.error(error);
         }
       },
