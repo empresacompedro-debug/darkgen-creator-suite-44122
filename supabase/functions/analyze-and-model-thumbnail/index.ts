@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { HfInference } from "https://esm.sh/@huggingface/inference@2.3.2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -57,7 +58,7 @@ serve(async (req) => {
       userId = user?.id || null;
     }
 
-    const { imageBase64, modelingLevel, includeText, customText, customInstructions, quantity, imageGenerator } = await req.json();
+    const { imageBase64, modelingLevel, includeText, customText, customInstructions, quantity, imageGenerator, imageModel } = await req.json();
     
     if (!imageBase64 || !modelingLevel || !quantity || !imageGenerator) {
       throw new Error('Missing required parameters');
@@ -352,6 +353,55 @@ Reinterpret the concept with fresh creativity while maintaining strategic effect
             } catch (fbErr) {
               console.error('Fallback error:', fbErr);
             }
+          }
+        } else if (imageGenerator === 'huggingface') {
+          try {
+            const HUGGING_FACE_TOKEN = Deno.env.get('HUGGING_FACE_ACCESS_TOKEN');
+            if (!HUGGING_FACE_TOKEN) {
+              throw new Error('HuggingFace Access Token não configurado. Adicione em Configurações.');
+            }
+            const hf = new HfInference(HUGGING_FACE_TOKEN);
+            const modelMap: Record<string, string> = {
+              'flux-schnell': 'black-forest-labs/FLUX.1-schnell',
+              'flux-dev': 'black-forest-labs/FLUX.1-dev',
+              'sdxl': 'stabilityai/stable-diffusion-xl-base-1.0',
+              'sdxl-turbo': 'stabilityai/sdxl-turbo',
+              'sd-21': 'stabilityai/stable-diffusion-2-1',
+              'sd-15': 'runwayml/stable-diffusion-v1-5',
+            };
+            const selectedModel = modelMap[imageModel] || modelMap['flux-schnell'];
+            console.log(`🤗 HF generating with ${selectedModel} (requested: ${imageModel})`);
+
+            // Pequeno atraso entre gerações para evitar rate limits
+            if (i > 0) await new Promise(r => setTimeout(r, 1500));
+
+            const hfImage = await hf.textToImage({ inputs: iterationPrompt, model: selectedModel });
+            const arrayBuffer = await hfImage.arrayBuffer();
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+            imageUrl = `data:image/png;base64,${base64}`;
+          } catch (hfErr) {
+            console.error(`❌ HuggingFace generation ${i + 1} failed:`, hfErr);
+          }
+        } else if (imageGenerator === 'pollinations') {
+          try {
+            const model = imageModel?.startsWith('pollinations')
+              ? (imageModel === 'pollinations' ? 'flux' : imageModel.replace('pollinations-', ''))
+              : 'flux';
+            const encodedPrompt = encodeURIComponent(iterationPrompt);
+            const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${model}&width=1280&height=720&enhance=true&nologo=true`;
+            console.log('📡 Pollinations URL:', pollinationsUrl.slice(0, 140) + '...');
+
+            const pollinationsResponse = await fetch(pollinationsUrl);
+            if (pollinationsResponse.ok) {
+              const buffer = await pollinationsResponse.arrayBuffer();
+              const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+              imageUrl = `data:image/png;base64,${base64}`;
+            } else {
+              const errTxt = await pollinationsResponse.text();
+              console.error(`❌ Pollinations generation ${i + 1} failed:`, pollinationsResponse.status, errTxt.substring(0, 200));
+            }
+          } catch (pErr) {
+            console.error(`❌ Pollinations error on ${i + 1}:`, pErr);
           }
         }
 
