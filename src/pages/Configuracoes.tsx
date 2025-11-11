@@ -48,6 +48,7 @@ const Configuracoes = () => {
   const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
   const [validatingKeys, setValidatingKeys] = useState(false);
   const [validationProgress, setValidationProgress] = useState({ current: 0, total: 0 });
+  const [revalidating, setRevalidating] = useState(false);
 
   useEffect(() => {
     loadUserData();
@@ -479,6 +480,47 @@ const Configuracoes = () => {
   };
 
 
+  const handleManualRevalidation = async () => {
+    if (!user) {
+      toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
+      return;
+    }
+
+    setRevalidating(true);
+    toast({ title: "Re-validando...", description: "Testando chaves esgotadas..." });
+
+    try {
+      const { data, error } = await supabase.functions.invoke('revalidate-exhausted-keys', {
+        body: { triggered_by: 'manual', user_id: user.id }
+      });
+
+      if (error) throw error;
+
+      const result = data.results;
+      
+      toast({
+        title: "Re-validação concluída!",
+        description: `✅ ${result.reactivated} reativada(s) | ⚠️ ${result.stillExhausted} ainda esgotada(s) | ❌ ${result.errors} erro(s)`,
+        variant: result.reactivated > 0 ? "default" : "destructive"
+      });
+
+      // Recarregar todas as chaves para mostrar as reativadas
+      if (result.reactivated > 0) {
+        await loadApiKeys(user.id);
+      }
+    } catch (error: any) {
+      console.error('Erro ao re-validar chaves:', error);
+      toast({
+        title: "Erro na re-validação",
+        description: error.message || 'Erro desconhecido',
+        variant: 'destructive'
+      });
+    } finally {
+      setRevalidating(false);
+    }
+  };
+
+
   const renderKeySection = (title: string, provider: string, keys: ApiKey[]) => (
     <Card className="p-6">
       <div className="space-y-4">
@@ -661,6 +703,63 @@ const Configuracoes = () => {
           </div>
         </Card>
       )}
+
+      <Card className="p-6 border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
+        <div className="flex items-start gap-4">
+          <div className="rounded-full bg-primary/20 p-3">
+            <CheckCircle className="h-6 w-6 text-primary" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold mb-2">🔄 Re-validação Automática de Chaves</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Chaves marcadas como esgotadas são automaticamente testadas a cada 24 horas. 
+              Se voltarem a funcionar, são reativadas automaticamente no sistema de rotação.
+            </p>
+            
+            <div className="bg-background/60 rounded-lg p-4 space-y-3 mb-4">
+              <div className="flex items-center gap-2 text-sm">
+                <Badge variant="outline" className="bg-background">⏰ Agendamento</Badge>
+                <span className="text-muted-foreground">Todos os dias às 3:00 AM UTC</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Badge variant="outline" className="bg-background">🎯 Critério</Badge>
+                <span className="text-muted-foreground">Chaves inativas há mais de 24 horas</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Badge variant="outline" className="bg-background">✅ Ação</Badge>
+                <span className="text-muted-foreground">Reativação automática se voltarem a funcionar</span>
+              </div>
+            </div>
+
+            <Button 
+              onClick={handleManualRevalidation}
+              disabled={revalidating}
+              variant="outline"
+              className="w-full sm:w-auto"
+            >
+              {revalidating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Re-validando...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Testar Re-validação Agora
+                </>
+              )}
+            </Button>
+
+            <Alert className="mt-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="text-xs">
+                <strong>💡 Como funciona:</strong> Chaves que atingiram quota são testadas novamente após 24h. 
+                APIs como YouTube/Gemini resetam quotas diariamente, permitindo reutilização automática.
+              </AlertDescription>
+            </Alert>
+          </div>
+        </div>
+      </Card>
 
       {renderKeySection("YouTube API Keys", "youtube", youtubeKeys)}
       {renderKeySection("Gemini API Keys", "gemini", geminiKeys)}
