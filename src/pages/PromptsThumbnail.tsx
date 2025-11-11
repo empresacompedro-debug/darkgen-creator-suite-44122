@@ -273,12 +273,10 @@ const PromptsThumbnail = () => {
       try {
         const imageBase64 = thumbnail.base64 || await urlToBase64(thumbnail.thumbnailUrl);
 
-        const { data, error } = await supabase.functions.invoke('analyze-and-model-thumbnail', {
+        const { data, error } = await supabase.functions.invoke('model-thumbnail', {
           body: {
             imageBase64,
             modelingLevel,
-            includeText,
-            customText,
             customInstructions,
             quantity: modelingQuantity,
             imageGenerator: provider,
@@ -288,9 +286,12 @@ const PromptsThumbnail = () => {
 
         if (error) throw error;
 
+        if (!data.success) {
+          throw new Error(data.error || 'Erro ao gerar imagens');
+        }
+
         allResults.push({
           original: { type: 'youtube', data: thumbnail },
-          analysis: data.analysis,
           generatedImages: data.generatedImages
         });
 
@@ -303,8 +304,6 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
-          ai_analysis: data.analysis,
-          ai_model: 'google/gemini-2.5-flash',
           user_id: user?.id
         });
 
@@ -331,12 +330,10 @@ const PromptsThumbnail = () => {
       try {
         const imageBase64 = await fileToBase64(file);
 
-        const { data, error } = await supabase.functions.invoke('analyze-and-model-thumbnail', {
+        const { data, error } = await supabase.functions.invoke('model-thumbnail', {
           body: {
             imageBase64,
             modelingLevel,
-            includeText,
-            customText,
             customInstructions,
             quantity: modelingQuantity,
             imageGenerator: provider,
@@ -346,9 +343,12 @@ const PromptsThumbnail = () => {
 
         if (error) throw error;
 
+        if (!data.success) {
+          throw new Error(data.error || 'Erro ao gerar imagens');
+        }
+
         allResults.push({
           original: { type: 'upload', data: file, preview: imageBase64 },
-          analysis: data.analysis,
           generatedImages: data.generatedImages
         });
 
@@ -361,8 +361,6 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
-          ai_analysis: data.analysis,
-          ai_model: 'google/gemini-2.5-flash',
           user_id: user?.id
         });
 

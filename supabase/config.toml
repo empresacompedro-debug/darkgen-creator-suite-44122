@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.generate-scene-prompts-v2]
 verify_jwt = false
+
+[functions.model-thumbnail]
+verify_jwt = true
