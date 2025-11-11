@@ -27,15 +27,24 @@ serve(async (req) => {
     for (let i = 0; i < quantity; i++) {
       console.log(`📸 [Generate] Image ${i + 1}/${quantity}`);
 
-      if (provider === 'pollinations') {
+      if (provider === 'nano-banana') {
+        if (!imageBase64 || imageBase64.length === 0) {
+          throw new Error('Nano Banana requires an original image (imageBase64)');
+        }
+        const imageBase64Data = await generateWithNanoBanana(prompt, imageBase64, strength);
+        generatedImages.push(imageBase64Data);
+        
+      } else if (provider === 'pollinations') {
         const imageUrl = await generateWithPollinations(prompt, model);
         generatedImages.push(imageUrl);
+        
       } else if (provider === 'huggingface') {
         const token = Deno.env.get('HUGGING_FACE_ACCESS_TOKEN');
         if (!token) throw new Error('HuggingFace token not configured');
         
         const imageBase64Data = await generateWithHuggingFace(prompt, model, token, imageBase64, strength);
         generatedImages.push(imageBase64Data);
+        
       } else {
         throw new Error(`Unknown provider: ${provider}`);
       }
@@ -112,6 +121,97 @@ async function generateWithPollinations(prompt: string, model: string): Promise<
   return `data:image/png;base64,${base64}`;
 }
 
+async function generateWithNanoBanana(
+  prompt: string, 
+  imageBase64: string, 
+  strength: number = 0.75
+): Promise<string> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    throw new Error('LOVABLE_API_KEY not configured');
+  }
+
+  console.log(`🍌 [Nano Banana] Starting image-to-image generation with strength: ${strength}`);
+
+  // Instruções baseadas no strength
+  let creativityInstructions = '';
+  if (strength < 0.3) {
+    creativityInstructions = 'Maintain EXACTLY the same composition, layout, and structure. Only make subtle color and lighting improvements.';
+  } else if (strength < 0.7) {
+    creativityInstructions = 'Keep the main composition and key elements, but feel free to enhance colors, lighting, and add creative details.';
+  } else {
+    creativityInstructions = 'Use the original as inspiration but create a bold new version with creative freedom in colors, effects, and style.';
+  }
+
+  const editPrompt = `Based on this thumbnail image, create a variation following these instructions:
+
+${prompt}
+
+Creativity Level: ${creativityInstructions}
+
+IMPORTANT: Maintain professional thumbnail quality suitable for YouTube (1280x720). Focus on visual impact and readability.`;
+
+  try {
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash-image-preview',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: editPrompt
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: imageBase64
+                }
+              }
+            ]
+          }
+        ],
+        modalities: ['image', 'text']
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`❌ [Nano Banana] API error: ${response.status} - ${errorText}`);
+      
+      if (response.status === 429) {
+        throw new Error('Limite de requisições atingido. Aguarde alguns segundos e tente novamente.');
+      }
+      if (response.status === 402) {
+        throw new Error('Créditos esgotados. Adicione créditos em Settings → Workspace → Usage.');
+      }
+      
+      throw new Error(`Nano Banana error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const generatedImageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    
+    if (!generatedImageUrl) {
+      console.error('❌ [Nano Banana] No image in response:', JSON.stringify(data).slice(0, 500));
+      throw new Error('Nano Banana did not return an image');
+    }
+
+    console.log(`✅ [Nano Banana] Image generated successfully`);
+    return generatedImageUrl;
+    
+  } catch (error: any) {
+    console.error(`❌ [Nano Banana] Error:`, error?.message || error);
+    throw new Error(`Nano Banana error: ${error?.message || 'Unknown error'}`);
+  }
+}
+
 async function generateWithHuggingFace(prompt: string, model: string, token: string, imageBase64?: string, strength: number = 0.75): Promise<string> {
   const modelMap: Record<string, string> = {
     'flux-schnell': 'black-forest-labs/FLUX.1-schnell',
@@ -125,7 +225,6 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   const modelId = modelMap[model] || modelMap['flux-schnell'];
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
   
-  // FLUX não suporta img2img via API de inferência - apenas Stable Diffusion
   const isFluxModel = model.includes('flux');
   const useImg2Img = !isFluxModel && imageBase64 && imageBase64.length > 0;
   
@@ -142,9 +241,6 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
     let requestBody: any;
     
     if (useImg2Img) {
-      // Para img2img: FLUX não suporta, apenas text-to-image
-      // AVISO: A API REST do HuggingFace tem suporte limitado a img2img
-      // Os resultados podem não manter a composição da imagem original
       const base64Clean = imageBase64.replace(/^data:image\/\w+;base64,/, '');
       
       requestBody = {
@@ -152,13 +248,12 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
           prompt: prompt,
           image: base64Clean,
           num_inference_steps: 50,
-          guidance_scale: 15 - (strength * 10) // Inverter: strength baixo = guidance alto
+          guidance_scale: 15 - (strength * 10)
         }
       };
       
       console.log(`📊 [HuggingFace] Using guidance_scale: ${requestBody.inputs.guidance_scale}`);
     } else {
-      // Text-to-image padrão
       requestBody = {
         inputs: prompt
       };

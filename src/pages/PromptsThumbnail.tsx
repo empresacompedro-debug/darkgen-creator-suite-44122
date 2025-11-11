@@ -64,8 +64,8 @@ const PromptsThumbnail = () => {
   
   // PASSO 2: Geração
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<'huggingface' | 'pollinations'>('pollinations');
-  const [selectedModel, setSelectedModel] = useState('pollinations');
+  const [selectedProvider, setSelectedProvider] = useState<'nano-banana' | 'huggingface' | 'pollinations'>('nano-banana');
+  const [selectedModel, setSelectedModel] = useState('nano-banana');
   const [generationQuantity, setGenerationQuantity] = useState(2);
   const [strengthValue, setStrengthValue] = useState(0.75); // Controla similaridade
   const [isGenerating, setIsGenerating] = useState(false);
@@ -488,6 +488,16 @@ const PromptsThumbnail = () => {
 
   // ========== PASSO 2: GERAR VARIAÇÕES ==========
   const handleGenerateVariations = async () => {
+    // Validar se Nano Banana tem imagem
+    if (selectedProvider === 'nano-banana' && !selectedImage) {
+      toast({
+        title: '⚠️ Imagem necessária',
+        description: 'Nano Banana precisa de uma imagem original. Faça o upload ou extraia uma thumbnail primeiro.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setIsGenerating(true);
 
     try {
@@ -534,6 +544,7 @@ const PromptsThumbnail = () => {
         custom_instructions: customInstructions,
         quantity: generationQuantity,
         image_generator: selectedProvider,
+        provider: selectedProvider,
         generated_images: data.generatedImages,
         ai_analysis: analyzedPrompt.substring(0, 5000),
         ai_model: selectedAIModel,
@@ -551,9 +562,18 @@ const PromptsThumbnail = () => {
 
     } catch (error: any) {
       console.error('❌ [Frontend] Generation error:', error);
+      
+      let errorMessage = error.message || 'Erro desconhecido';
+      
+      if (error.message?.includes('429')) {
+        errorMessage = '🍌 Nano Banana: Muitas requisições. Aguarde 1 minuto e tente novamente.';
+      } else if (error.message?.includes('402')) {
+        errorMessage = '🍌 Nano Banana: Créditos esgotados. Adicione créditos nas configurações.';
+      }
+      
       toast({
         title: 'Erro na Geração',
-        description: error.message,
+        description: errorMessage,
         variant: 'destructive'
       });
     } finally {
@@ -1252,11 +1272,22 @@ const PromptsThumbnail = () => {
                             <p className="text-sm text-muted-foreground">
                               {new Date(item.created_at).toLocaleString('pt-BR')}
                             </p>
-                            <p className="text-sm">
-                              <strong>Nível:</strong> {item.modeling_level} • 
-                              <strong> Gerador:</strong> {item.image_generator} •
-                              <strong> Qtd:</strong> {item.quantity}
-                            </p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm">
+                                <strong>Nível:</strong> {item.modeling_level} • 
+                                <strong> Qtd:</strong> {item.quantity}
+                              </p>
+                              {item.provider === 'nano-banana' && (
+                                <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">
+                                  🍌 Nano Banana
+                                </span>
+                              )}
+                              {item.provider && item.provider !== 'nano-banana' && (
+                                <span className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded">
+                                  {item.provider}
+                                </span>
+                              )}
+                            </div>
                           </div>
                           <div className="flex gap-2">
                             <Button
@@ -1313,53 +1344,73 @@ const PromptsThumbnail = () => {
                 value={selectedProvider} 
                 onValueChange={(v: any) => {
                   setSelectedProvider(v);
-                  // SDXL como padrão para HuggingFace (suporta img2img)
-                  setSelectedModel(v === 'huggingface' ? 'sdxl' : 'pollinations');
+                  if (v === 'nano-banana') {
+                    setSelectedModel('nano-banana');
+                  } else if (v === 'huggingface') {
+                    setSelectedModel('sdxl');
+                  } else {
+                    setSelectedModel('pollinations');
+                  }
                 }}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="nano-banana">
+                    <div className="flex items-center gap-2">
+                      <span>🍌</span>
+                      <span>Nano Banana</span>
+                      <span className="ml-2 text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded">Recomendado</span>
+                    </div>
+                  </SelectItem>
                   <SelectItem value="pollinations">
-                    🌸 Pollinations.ai (Gratuito, Rápido)
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4" />
+                      <span>Pollinations.ai</span>
+                    </div>
                   </SelectItem>
                   <SelectItem value="huggingface">
-                    🤗 HuggingFace (Requer Token)
+                    <div className="flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4" />
+                      <span>HuggingFace</span>
+                    </div>
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             
             {/* Seletor de Modelo */}
-            <div>
-              <Label>Modelo</Label>
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectedProvider === 'pollinations' ? (
-                    <>
-                      <SelectItem value="pollinations">Flux (Padrão)</SelectItem>
-                      <SelectItem value="pollinations-flux-realism">Flux Realism</SelectItem>
-                      <SelectItem value="pollinations-flux-anime">Flux Anime</SelectItem>
-                      <SelectItem value="pollinations-flux-3d">Flux 3D</SelectItem>
-                      <SelectItem value="pollinations-turbo">Turbo (Ultra Rápido)</SelectItem>
-                    </>
-                  ) : (
-                    <>
-                      <SelectItem value="flux-schnell">FLUX Schnell (Rápido)</SelectItem>
-                      <SelectItem value="flux-dev">FLUX Dev (Qualidade)</SelectItem>
-                      <SelectItem value="sdxl">SDXL (Melhor Qualidade)</SelectItem>
-                      <SelectItem value="sdxl-turbo">SDXL Turbo</SelectItem>
-                      <SelectItem value="sd-21">Stable Diffusion 2.1</SelectItem>
-                      <SelectItem value="sd-15">Stable Diffusion 1.5</SelectItem>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
+            {selectedProvider !== 'nano-banana' && (
+              <div>
+                <Label>Modelo</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedProvider === 'pollinations' ? (
+                      <>
+                        <SelectItem value="pollinations">Flux (Padrão)</SelectItem>
+                        <SelectItem value="pollinations-flux-realism">Flux Realism</SelectItem>
+                        <SelectItem value="pollinations-flux-anime">Flux Anime</SelectItem>
+                        <SelectItem value="pollinations-flux-3d">Flux 3D</SelectItem>
+                        <SelectItem value="pollinations-turbo">Turbo (Ultra Rápido)</SelectItem>
+                      </>
+                    ) : (
+                      <>
+                        <SelectItem value="flux-schnell">FLUX Schnell (Rápido)</SelectItem>
+                        <SelectItem value="flux-dev">FLUX Dev (Qualidade)</SelectItem>
+                        <SelectItem value="sdxl">SDXL (Melhor Qualidade)</SelectItem>
+                        <SelectItem value="sdxl-turbo">SDXL Turbo</SelectItem>
+                        <SelectItem value="sd-21">Stable Diffusion 2.1</SelectItem>
+                        <SelectItem value="sd-15">Stable Diffusion 1.5</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             
             {/* Quantidade */}
             <div>
@@ -1381,22 +1432,38 @@ const PromptsThumbnail = () => {
               </Select>
             </div>
             
+            {/* Info Nano Banana */}
+            {selectedProvider === 'nano-banana' && (
+              <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">🍌</span>
+                  <div>
+                    <h4 className="font-semibold text-green-900 dark:text-green-100">Nano Banana (Recomendado)</h4>
+                    <p className="text-sm text-green-800 dark:text-green-200 mt-1">
+                      O Nano Banana usa IA avançada para criar variações mantendo a estrutura da sua thumbnail original. 
+                      Ajuste a criatividade para controlar o quanto a imagem será modificada.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Aviso sobre limitações da API */}
             {selectedProvider === 'huggingface' && (
               <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
                 <p className="text-xs text-yellow-600 dark:text-yellow-400">
                   ⚠️ <strong>Limitação técnica:</strong> A API REST do Hugging Face tem suporte limitado para Image-to-Image.
                   Os resultados podem não manter perfeitamente a composição da imagem original.
-                  Para melhores resultados, considere usar <strong>Pollinations</strong> que gera a partir do prompt detalhado da análise.
+                  Para melhores resultados, considere usar <strong>Nano Banana 🍌</strong>.
                 </p>
               </div>
             )}
             
-            {/* Controle de Similaridade (apenas HuggingFace + Stable Diffusion) */}
-            {selectedProvider === 'huggingface' && !selectedModel.includes('flux') && (
+            {/* Controle de Similaridade */}
+            {(selectedProvider === 'nano-banana' || (selectedProvider === 'huggingface' && !selectedModel.includes('flux'))) && (
               <div className="space-y-2">
                 <Label htmlFor="strength">
-                  Criatividade: {strengthValue.toFixed(2)}
+                  {selectedProvider === 'nano-banana' ? 'Criatividade 🍌' : 'Criatividade'}: {strengthValue.toFixed(2)}
                 </Label>
                 <Slider
                   id="strength"
@@ -1453,7 +1520,10 @@ const PromptsThumbnail = () => {
                     Gerando {generationQuantity}x...
                   </>
                 ) : (
-                  `✨ Gerar ${generationQuantity} Variações`
+                  <>
+                    {selectedProvider === 'nano-banana' && <span className="mr-2">🍌</span>}
+                    {`✨ Gerar ${generationQuantity} Variações`}
+                  </>
                 )}
               </Button>
             </div>

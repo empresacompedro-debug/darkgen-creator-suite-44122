@@ -1026,6 +1026,7 @@ export type Database = {
           include_text: boolean | null
           modeling_level: string
           original_image_url: string
+          provider: string | null
           quantity: number | null
           user_id: string
         }
@@ -1040,6 +1041,7 @@ export type Database = {
           include_text?: boolean | null
           modeling_level: string
           original_image_url: string
+          provider?: string | null
           quantity?: number | null
           user_id: string
         }
@@ -1054,6 +1056,7 @@ export type Database = {
           include_text?: boolean | null
           modeling_level?: string
           original_image_url?: string
+          provider?: string | null
           quantity?: number | null
           user_id?: string
         }
