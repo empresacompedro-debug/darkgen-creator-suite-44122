@@ -309,9 +309,9 @@ const Brainstorm = () => {
               <Label htmlFor="prompt">O que você quer descobrir?</Label>
               <span className={cn(
                 "text-sm",
-                prompt.length > 5000 ? "text-destructive font-semibold" : "text-muted-foreground"
+                prompt.length > 12000 ? "text-destructive font-semibold" : "text-muted-foreground"
               )}>
-                {prompt.length}/5000
+                {prompt.length}/12000
               </span>
             </div>
             <Textarea
@@ -322,9 +322,9 @@ const Brainstorm = () => {
               rows={4}
               className="resize-none"
             />
-            {prompt.length > 5000 && (
+            {prompt.length > 12000 && (
               <p className="text-sm text-destructive">
-                O prompt excede o limite de 5000 caracteres
+                O prompt excede o limite de 12000 caracteres
               </p>
             )}
           </div>
@@ -424,7 +424,7 @@ const Brainstorm = () => {
 
           <Button
             onClick={handleStreamIdeas}
-            disabled={isStreaming || !prompt.trim() || prompt.length > 5000 || (battleMode && selectedAIs.length === 0)}
+            disabled={isStreaming || !prompt.trim() || prompt.length > 12000 || (battleMode && selectedAIs.length === 0)}
             className="w-full"
           >
             {isStreaming ? (

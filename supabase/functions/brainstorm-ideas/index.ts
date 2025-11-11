@@ -37,7 +37,7 @@ serve(async (req) => {
 
     // Validação
     const errors = [
-      ...validateString(body.prompt, 'prompt', { required: true, maxLength: 5000 }),
+      ...validateString(body.prompt, 'prompt', { required: true, maxLength: 12000 }),
     ];
 
     if (battleMode) {
