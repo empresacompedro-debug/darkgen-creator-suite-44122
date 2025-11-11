@@ -1313,7 +1313,8 @@ const PromptsThumbnail = () => {
                 value={selectedProvider} 
                 onValueChange={(v: any) => {
                   setSelectedProvider(v);
-                  setSelectedModel(v === 'huggingface' ? 'flux-schnell' : 'pollinations');
+                  // SDXL como padrão para HuggingFace (suporta img2img)
+                  setSelectedModel(v === 'huggingface' ? 'sdxl' : 'pollinations');
                 }}
               >
                 <SelectTrigger>
@@ -1380,8 +1381,8 @@ const PromptsThumbnail = () => {
               </Select>
             </div>
             
-            {/* Controle de Similaridade (apenas HuggingFace) */}
-            {selectedProvider === 'huggingface' && (
+            {/* Controle de Similaridade (apenas HuggingFace + Stable Diffusion) */}
+            {selectedProvider === 'huggingface' && !selectedModel.includes('flux') && (
               <div className="space-y-2">
                 <Label htmlFor="strength">
                   Similaridade com Original: {strengthValue.toFixed(2)}
@@ -1401,6 +1402,17 @@ const PromptsThumbnail = () => {
                     : strengthValue < 0.8 
                     ? '⚖️ Equilibrado' 
                     : '🎨 Mais criativo/diferente'}
+                </p>
+              </div>
+            )}
+            
+            {/* Aviso para modelos FLUX */}
+            {selectedProvider === 'huggingface' && selectedModel.includes('flux') && (
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-xs text-muted-foreground">
+                  ℹ️ <strong>Nota:</strong> Modelos FLUX não suportam Image-to-Image via API. 
+                  Será gerada uma nova imagem baseada no prompt detalhado.
+                  Para variações mais similares, use modelos SDXL.
                 </p>
               </div>
             )}

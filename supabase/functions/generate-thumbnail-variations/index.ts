@@ -125,9 +125,13 @@ async function generateWithHuggingFace(prompt: string, model: string, token: str
   const modelId = modelMap[model] || modelMap['flux-schnell'];
   console.log(`🤗 [HuggingFace] Using model: ${modelId}`);
   
-  // Se temos imagem original, usar img2img
-  const useImg2Img = imageBase64 && imageBase64.length > 0;
-  if (useImg2Img) {
+  // FLUX não suporta img2img via API de inferência - apenas Stable Diffusion
+  const isFluxModel = model.includes('flux');
+  const useImg2Img = !isFluxModel && imageBase64 && imageBase64.length > 0;
+  
+  if (isFluxModel && imageBase64) {
+    console.log(`⚠️ [HuggingFace] FLUX models don't support img2img via API - using text-to-image`);
+  } else if (useImg2Img) {
     console.log(`🖼️ [HuggingFace] Using Image-to-Image mode with strength: ${strength}`);
   }
 
