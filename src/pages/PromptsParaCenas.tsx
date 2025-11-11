@@ -208,6 +208,12 @@ const PromptsParaCenas = () => {
           prompts: accumulatedText,
           ai_model: aiModel,
           title: `Prompts ${new Date().toLocaleString('pt-BR')}`,
+          generation_mode: generationMode,
+          scene_style: sceneStyle,
+          characters: characters as any,
+          optimize_for: optimizeFor,
+          language,
+          include_text: includeText,
         });
 
         if (saveError) {

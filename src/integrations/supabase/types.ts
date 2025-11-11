@@ -831,27 +831,45 @@ export type Database = {
       scene_prompts: {
         Row: {
           ai_model: string | null
+          characters: Json | null
           created_at: string
+          generation_mode: string | null
           id: string
+          include_text: boolean | null
+          language: string | null
+          optimize_for: string | null
           prompts: string
+          scene_style: string | null
           script_content: string
           title: string | null
           user_id: string
         }
         Insert: {
           ai_model?: string | null
+          characters?: Json | null
           created_at?: string
+          generation_mode?: string | null
           id?: string
+          include_text?: boolean | null
+          language?: string | null
+          optimize_for?: string | null
           prompts: string
+          scene_style?: string | null
           script_content: string
           title?: string | null
           user_id: string
         }
         Update: {
           ai_model?: string | null
+          characters?: Json | null
           created_at?: string
+          generation_mode?: string | null
           id?: string
+          include_text?: boolean | null
+          language?: string | null
+          optimize_for?: string | null
           prompts?: string
+          scene_style?: string | null
           script_content?: string
           title?: string | null
           user_id?: string
