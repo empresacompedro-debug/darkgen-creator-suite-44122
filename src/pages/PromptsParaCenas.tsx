@@ -206,13 +206,8 @@ const PromptsParaCenas = () => {
           user_id: user.id,
           script_content: script.substring(0, 500),
           prompts: accumulatedText,
-          generation_mode: generationMode,
-          scene_style: sceneStyle,
-          characters,
-          optimize_for: optimizeFor,
-          language,
-          include_text: includeText,
           ai_model: aiModel,
+          title: `Prompts ${new Date().toLocaleString('pt-BR')}`,
         });
 
         if (saveError) {
