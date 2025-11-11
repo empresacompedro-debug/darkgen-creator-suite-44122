@@ -45,17 +45,23 @@ serve(async (req) => {
       );
     }
 
-    // 2. Fazer chamada de teste ao Vertex AI (listar modelos disponíveis)
-    const testUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models`;
+    // 2. Fazer chamada de teste ao Vertex AI usando generateContent (endpoint correto)
+    const model = 'gemini-2.0-flash-exp';
+    const testUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${model}:generateContent`;
     
     console.log(`🔍 [Test Vertex AI] Fazendo chamada de teste para: ${testUrl}`);
 
     const response = await fetch(testUrl, {
-      method: 'GET',
+      method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{ text: 'Responda apenas: OK' }]
+        }]
+      })
     });
 
     if (!response.ok) {
@@ -90,13 +96,18 @@ serve(async (req) => {
 
     const data = await response.json();
     console.log('✅ [Test Vertex AI] Credenciais validadas com sucesso');
-    console.log(`📊 [Test Vertex AI] Modelos disponíveis: ${data.models?.length || 0}`);
+    console.log(`📊 [Test Vertex AI] Resposta do modelo:`, data);
+
+    // Verificar se recebemos uma resposta válida do modelo
+    const hasValidResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     return new Response(
       JSON.stringify({ 
         valid: true, 
-        message: 'Credenciais Vertex AI válidas e funcionando!',
-        modelsCount: data.models?.length || 0
+        message: `Credenciais Vertex AI válidas! Projeto: ${projectId}, Região: ${location}`,
+        projectId,
+        location,
+        responseReceived: !!hasValidResponse
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { validateString, validateArray, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
 import { getApiKey, getApiKeyWithHierarchicalFallback, updateApiKeyUsage } from '../_shared/get-api-key.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -64,8 +65,8 @@ serve(async (req) => {
     console.log('🌍 [translate-script] Idiomas alvo:', targetLanguages);
     console.log('👤 [translate-script] User ID:', userId);
 
-    // Use aiModel directly - get-api-key handles provider detection
-    const modelToUse = aiModel;
+    // Usar helper para mapear modelo → provider
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
 
     const languageNames: Record<string, string> = {
       pt: 'Português Brasileiro',
@@ -108,7 +109,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
             let apiKey = '';
             let requestBody: any = {};
 
-            if (modelToUse.startsWith('claude')) {
+            if (providerKey === 'claude') {
               console.log(`🔑 [translate-script] Buscando API key Anthropic para ${targetLang}`);
               
               const keyData = await getApiKey(userId, 'claude', supabase);
@@ -127,8 +128,8 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
                 'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet-20250219',
                 'claude-sonnet-4-20250514': 'claude-sonnet-4-20250514'
               };
-              const finalModel = modelMap[modelToUse] || 'claude-sonnet-4-20250514';
-              console.log(`🤖 [translate-script] Modelo mapeado: ${modelToUse} → ${finalModel}`);
+              const finalModel = modelMap[actualModel] || 'claude-sonnet-4-20250514';
+              console.log(`🤖 [translate-script] Modelo mapeado: ${actualModel} → ${finalModel}`);
               const maxTokens = getMaxTokensForModel(finalModel);
               console.log(`📦 [translate-script] Usando ${maxTokens} max_tokens para ${finalModel} (${targetLang})`);
               
@@ -138,33 +139,86 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
                 messages: [{ role: 'user', content: prompt }],
                 stream: true
               };
-            } else if (modelToUse.startsWith('gemini')) {
-              console.log(`🔑 [translate-script] Buscando API key Gemini com fallback hierárquico para ${targetLang}`);
+            } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
+              console.log(`🔑 [translate-script] Buscando API key ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini com fallback'} para ${targetLang}`);
               
-              const keyData = await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabase);
+              const keyData = providerKey === 'vertex-ai'
+                ? await getApiKey(userId, 'vertex-ai', supabase)
+                : await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabase);
+              
               if (!keyData) {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'API key não configurada para Gemini/Vertex AI' })}\n\n`));
                 continue;
               }
               
-              const { url: apiUrl, headers: apiHeaders, body: apiBody } = await buildGeminiOrVertexRequest(
+              const { url, headers: apiHeaders, body: apiBody } = await buildGeminiOrVertexRequest(
                 keyData,
-                modelToUse.replace('gemini-', 'gemini-2.0-flash-exp'),
+                actualModel,
                 prompt,
                 true // streaming
               );
               
-              console.log(`🤖 [translate-script] Usando ${keyData.provider} para ${targetLang}`);
+              apiUrl = url;
+              const usedProvider = 'provider' in keyData ? keyData.provider : providerKey;
+              console.log(`🤖 [translate-script] Usando ${usedProvider} para ${targetLang}`);
               
-              const response = await fetch(apiUrl, {
+              // Fetch usando os headers do Vertex/Gemini
+              const response = await fetch(url, {
                 method: 'POST',
                 headers: apiHeaders,
                 body: JSON.stringify(apiBody)
               });
-            } else if (modelToUse.startsWith('gpt')) {
+
+              console.log(`📨 [translate-script] Status da resposta (${targetLang}):`, response.status);
+
+              if (!response.ok) {
+                const errorData = await response.text();
+                console.error(`❌ [translate-script] Erro da API (${targetLang}):`, errorData);
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: `API Error: ${response.status}` })}\n\n`));
+                continue;
+              }
+
+              if (!response.body) {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: 'No response body' })}\n\n`));
+                continue;
+              }
+
+              const reader = response.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = '';
+
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                  if (!line.trim() || line.startsWith(':')) continue;
+                  
+                  if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    try {
+                      const parsed = JSON.parse(data);
+                      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                      if (text) {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, text })}\n\n`));
+                      }
+                    } catch (e) {
+                      console.error('Error parsing Gemini chunk:', e);
+                    }
+                  }
+                }
+              }
+
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, status: 'done' })}\n\n`));
+              continue;
+            } else if (providerKey === 'openai') {
               console.log(`🔑 [translate-script] Buscando API key OpenAI para ${targetLang}`);
               
-              // Buscar chave do usuário diretamente (como analyze-titles faz)
+              // Buscar chave do usuário diretamente
               if (userId) {
                 const { data: keys } = await supabase
                   .from('user_api_keys')
@@ -204,11 +258,10 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
               
               apiUrl = 'https://api.openai.com/v1/chat/completions';
               
-              // Usar modelo EXATAMENTE como veio (sem mapeamento) e max_tokens fixo como analyze-titles
-              console.log(`🤖 [translate-script] Usando modelo: ${modelToUse}`);
+              console.log(`🤖 [translate-script] Usando modelo: ${actualModel}`);
               
               requestBody = {
-                model: modelToUse,
+                model: actualModel,
                 messages: [{ role: 'user', content: prompt }],
                 stream: true,
                 max_tokens: 8192
@@ -216,7 +269,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
             }
 
             if (!apiKey) {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: `API key não configurada para ${modelToUse}` })}\n\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ language: targetLang, error: `API key não configurada para ${actualModel}` })}\n\n`));
               continue;
             }
 
@@ -224,10 +277,10 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
               'Content-Type': 'application/json'
             };
 
-            if (modelToUse.startsWith('claude')) {
+            if (providerKey === 'claude') {
               headers['x-api-key'] = apiKey;
               headers['anthropic-version'] = '2023-06-01';
-            } else if (modelToUse.startsWith('gpt')) {
+            } else if (providerKey === 'openai') {
               headers['Authorization'] = `Bearer ${apiKey}`;
             }
 
@@ -269,7 +322,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
               for (const line of lines) {
                 if (!line.trim() || line.startsWith(':')) continue;
                 
-                if (modelToUse.startsWith('claude')) {
+                if (providerKey === 'claude') {
                   // Claude SSE format
                   if (line.startsWith('data: ')) {
                     const data = line.slice(6);
@@ -284,7 +337,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
                       console.error('Error parsing Claude chunk:', e);
                     }
                   }
-                } else if (modelToUse.startsWith('gpt')) {
+                } else if (providerKey === 'openai') {
                   // OpenAI SSE format
                   if (line.startsWith('data: ')) {
                     const data = line.slice(6);
@@ -300,7 +353,7 @@ TRADUÇÃO PARA ${languageNames[targetLang] || targetLang}:`;
                       console.error('Error parsing GPT chunk:', e);
                     }
                   }
-                } else if (modelToUse.startsWith('gemini')) {
+                } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
                   // Gemini SSE format
                   if (line.startsWith('data: ')) {
                     const data = line.slice(6);

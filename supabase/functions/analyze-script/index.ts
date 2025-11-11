@@ -1,8 +1,10 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded } from '../_shared/get-api-key.ts';
+import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -87,16 +89,18 @@ Critérios:
 
 Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
 
+    // Usar helper para mapear modelo → provider
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
+
     let apiUrl = '';
     let apiKey = '';
     let requestBody: any = {};
-    let provider: 'gemini' | 'claude' | 'openai' = 'claude';
+    let provider: 'gemini' | 'claude' | 'openai' | 'vertex-ai' = providerKey;
 
-    if (aiModel.startsWith('claude')) {
-      provider = 'claude';
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+    if (providerKey === 'claude') {
+      const apiKeyResult = await getApiKey(userId, 'claude', supabaseClient);
       if (!apiKeyResult || !apiKeyResult.key) {
-        throw new Error(`API key não configurada para ${provider}`);
+        throw new Error('API key não configurada para Claude');
       }
       apiKey = apiKeyResult.key;
       
@@ -107,7 +111,7 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
         'claude-sonnet-4': 'claude-sonnet-4-20250514',
         'claude-sonnet-3.5': 'claude-sonnet-4-5'
       };
-      const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
+      const finalModel = modelMap[actualModel] || 'claude-sonnet-4-5';
       const maxTokens = getMaxTokensForModel(finalModel);
       console.log(`📦 [analyze-script] Usando ${maxTokens} max_tokens para ${finalModel}`);
       
@@ -116,40 +120,39 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
         max_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }]
       };
-    } else if (aiModel.startsWith('gemini')) {
-      provider = 'gemini';
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
-      if (!apiKeyResult || !apiKeyResult.key) {
-        throw new Error(`API key não configurada para ${provider}`);
+    } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
+      const apiKeyResult = providerKey === 'vertex-ai'
+        ? await getApiKey(userId, 'vertex-ai', supabaseClient)
+        : await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
+      
+      if (!apiKeyResult) {
+        throw new Error('API key não configurada para Gemini/Vertex AI');
       }
-      apiKey = apiKeyResult.key;
       
-      const modelMap: Record<string, string> = {
-        'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-      };
-      const finalModel = modelMap[aiModel] || 'gemini-2.0-flash-exp';
+      const { url, headers: apiHeaders, body } = await buildGeminiOrVertexRequest(apiKeyResult, actualModel, prompt, false);
+      apiUrl = url;
+      requestBody = body;
       
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalModel}:generateContent?key=${apiKey}`;
-      requestBody = {
-        contents: [{ parts: [{ text: prompt }] }]
-      };
-    } else if (aiModel.startsWith('gpt')) {
-      provider = 'openai';
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+      // Se for Gemini normal, extrair a key da URL
+      if (providerKey === 'gemini') {
+        apiKey = apiKeyResult.key;
+      }
+      
+      console.log(`📦 [analyze-script] Usando ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini'} - modelo: ${actualModel}`);
+    } else if (providerKey === 'openai') {
+      const apiKeyResult = await getApiKey(userId, 'openai', supabaseClient);
       if (!apiKeyResult || !apiKeyResult.key) {
-        throw new Error(`API key não configurada para ${provider}`);
+        throw new Error('API key não configurada para OpenAI');
       }
       apiKey = apiKeyResult.key;
       
       apiUrl = 'https://api.openai.com/v1/chat/completions';
-      const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
-      const maxTokens = getMaxTokensForModel(aiModel);
-      console.log(`📦 [analyze-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel}`);
+      const isReasoningModel = actualModel.startsWith('gpt-5') || actualModel.startsWith('o3-') || actualModel.startsWith('o4-');
+      const maxTokens = getMaxTokensForModel(actualModel);
+      console.log(`📦 [analyze-script] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${actualModel}`);
       
       requestBody = {
-        model: aiModel,
+        model: actualModel,
         messages: [{ role: 'user', content: prompt }],
         ...(isReasoningModel 
           ? { max_completion_tokens: maxTokens }
@@ -162,10 +165,10 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
       'Content-Type': 'application/json'
     };
 
-    if (aiModel.startsWith('claude')) {
+    if (providerKey === 'claude') {
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = '2023-06-01';
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (providerKey === 'openai') {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
@@ -193,11 +196,11 @@ Retorne SOMENTE o JSON, sem nenhum texto adicional.`;
     const data = await response.json();
     let analysis = '';
 
-    if (aiModel.startsWith('claude')) {
+    if (providerKey === 'claude') {
       analysis = data.content[0].text;
-    } else if (aiModel.startsWith('gemini')) {
+    } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
       analysis = data.candidates[0].content.parts[0].text;
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (providerKey === 'openai') {
       analysis = data.choices[0].message.content;
     }
 

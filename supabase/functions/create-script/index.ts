@@ -1,8 +1,10 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded } from '../_shared/get-api-key.ts';
+import { getApiKey, updateApiKeyUsage, markApiKeyAsExceeded, getApiKeyWithHierarchicalFallback } from '../_shared/get-api-key.ts';
 import { validateString, validateNumber, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -489,19 +491,21 @@ AGORA: Gere o roteiro COMPLETO seguindo TODAS as técnicas acima.
 IMPORTANTE: Gere TODAS as ${parts} partes com EXATAMENTE ${wordsPerPart} palavras cada.
 NÃO PARE até completar o roteiro inteiro!`;
 
+    // Usar helper para mapear modelo → provider
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
+    
     let apiUrl = '';
     let apiKey = '';
     let requestBody: any = {};
-    let provider: 'youtube' | 'gemini' | 'claude' | 'openai' = 'claude';
+    let provider: 'youtube' | 'gemini' | 'claude' | 'openai' | 'vertex-ai' = providerKey;
 
-    if (aiModel.startsWith('claude')) {
-      provider = 'claude';
-      console.log('🔑 Buscando API key para provider:', provider);
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+    if (providerKey === 'claude') {
+      console.log('🔑 Buscando API key para Claude');
+      const apiKeyResult = await getApiKey(userId, 'claude', supabaseClient);
       
       if (!apiKeyResult || !apiKeyResult.key) {
-        console.error('❌ ERRO: Nenhuma API key encontrada para', provider);
-        throw new Error(`API key não configurada para ${provider}`);
+        console.error('❌ ERRO: Nenhuma API key encontrada para Claude');
+        throw new Error('API key não configurada para Claude');
       }
       
       apiKey = apiKeyResult.key;
@@ -510,11 +514,11 @@ NÃO PARE até completar o roteiro inteiro!`;
       
       apiUrl = 'https://api.anthropic.com/v1/messages';
       const modelMap: Record<string, string> = {
-        'claude-sonnet-4': 'claude-sonnet-4-0',           // alias oficial do Claude 4
-        'claude-sonnet-4.5': 'claude-sonnet-4-5',         // alias oficial do Claude 4.5
-        'claude-sonnet-3.5': 'claude-3-7-sonnet-20250219' // fallback para Sonnet 3.7 (estável)
+        'claude-sonnet-4': 'claude-sonnet-4-0',
+        'claude-sonnet-4.5': 'claude-sonnet-4-5',
+        'claude-sonnet-3.5': 'claude-3-7-sonnet-20250219'
       };
-      const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
+      const finalModel = modelMap[actualModel] || 'claude-sonnet-4-5';
       console.log('📦 Modelo da API Anthropic:', finalModel);
       
       requestBody = {
@@ -523,39 +527,40 @@ NÃO PARE até completar o roteiro inteiro!`;
         messages: [{ role: 'user', content: prompt }],
         stream: true
       };
-    } else if (aiModel.startsWith('gemini')) {
-      provider = 'gemini';
-      console.log('🔑 Buscando API key para provider:', provider);
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+    } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
+      console.log(`🔑 Buscando API key para ${providerKey === 'vertex-ai' ? 'Vertex AI' : 'Gemini com fallback'}`);
+      const apiKeyResult = providerKey === 'vertex-ai'
+        ? await getApiKey(userId, 'vertex-ai', supabaseClient)
+        : await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient);
       
-      if (!apiKeyResult || !apiKeyResult.key) {
-        console.error('❌ ERRO: Nenhuma API key encontrada para', provider);
-        throw new Error(`API key não configurada para ${provider}`);
+      if (!apiKeyResult) {
+        console.error('❌ ERRO: Nenhuma API key encontrada para Gemini/Vertex AI');
+        throw new Error('API key não configurada para Gemini/Vertex AI');
       }
       
-      apiKey = apiKeyResult.key;
-      console.log('✅ API key encontrada:', `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`);
+      console.log('✅ API key encontrada');
       console.log('📍 Fonte da key:', apiKeyResult.keyId === 'global' ? 'Global' : 'Usuário');
-      const modelMap: Record<string, string> = {
-        'gemini-2.5-pro': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash': 'gemini-2.0-flash-exp',
-        'gemini-2.5-flash-lite': 'gemini-1.5-flash'
-      };
-      const finalModel = modelMap[aiModel] || 'gemini-2.0-flash-exp';
-      console.log('📦 Modelo da API Gemini:', finalModel);
       
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalModel}:streamGenerateContent?key=${apiKey}&alt=sse`;
-      requestBody = {
-        contents: [{ parts: [{ text: prompt }] }]
-      };
-    } else if (aiModel.startsWith('gpt')) {
-      provider = 'openai';
-      console.log('🔑 Buscando API key para provider:', provider);
-      const apiKeyResult = await getApiKey(userId, provider, supabaseClient);
+      const { url, headers, body } = await buildGeminiOrVertexRequest(apiKeyResult, actualModel, prompt, true);
+      apiUrl = url;
+      requestBody = body;
+      
+      // Copiar headers para usar no fetch
+      Object.keys(headers).forEach(key => {
+        if (key.toLowerCase() !== 'content-type') {
+          (headers as any)[key] = headers[key];
+        }
+      });
+      
+      const usedProvider = 'provider' in apiKeyResult ? apiKeyResult.provider : providerKey;
+      console.log(`🤖 Usando ${usedProvider} - modelo: ${actualModel}`);
+    } else if (providerKey === 'openai') {
+      console.log('🔑 Buscando API key para OpenAI');
+      const apiKeyResult = await getApiKey(userId, 'openai', supabaseClient);
       
       if (!apiKeyResult || !apiKeyResult.key) {
-        console.error('❌ ERRO: Nenhuma API key encontrada para', provider);
-        throw new Error(`API key não configurada para ${provider}`);
+        console.error('❌ ERRO: Nenhuma API key encontrada para OpenAI');
+        throw new Error('API key não configurada para OpenAI');
       }
       
       apiKey = apiKeyResult.key;
@@ -563,17 +568,17 @@ NÃO PARE até completar o roteiro inteiro!`;
       console.log('📍 Fonte da key:', apiKeyResult.keyId === 'global' ? 'Global' : 'Usuário');
       
       apiUrl = 'https://api.openai.com/v1/chat/completions';
-      console.log('📦 Modelo da API OpenAI:', aiModel);
+      console.log('📦 Modelo da API OpenAI:', actualModel);
       
       requestBody = {
-        model: aiModel,
+        model: actualModel,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 16000,
         stream: true
       };
     }
 
-    if (!apiKey) {
+    if (!apiKey && (providerKey === 'claude' || providerKey === 'openai')) {
       console.error('❌ ERRO CRÍTICO: API key vazia após todas as tentativas');
       throw new Error(`API key não configurada para ${aiModel}`);
     }
@@ -582,10 +587,10 @@ NÃO PARE até completar o roteiro inteiro!`;
       'Content-Type': 'application/json'
     };
 
-    if (aiModel.startsWith('claude')) {
+    if (providerKey === 'claude') {
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = '2023-06-01';
-    } else if (aiModel.startsWith('gpt')) {
+    } else if (providerKey === 'openai') {
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 

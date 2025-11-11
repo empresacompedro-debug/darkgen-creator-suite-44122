@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { executeWithKeyRotation } from '../_shared/get-api-key.ts';
 import { validateString, validateArray, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -70,19 +71,17 @@ REGRAS:
 
 Retorne o roteiro completo melhorado:`;
 
-    let provider: 'gemini' | 'claude' | 'openai' = 'claude';
-    if (aiModel.startsWith('gemini')) provider = 'gemini';
-    if (aiModel.startsWith('gpt')) provider = 'openai';
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
 
     const improvedScript = await executeWithKeyRotation(
       userId,
-      provider,
+      providerKey,
       supabaseClient,
       async (apiKey) => {
         let apiUrl = '';
         let requestBody: any = {};
 
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           apiUrl = 'https://api.anthropic.com/v1/messages';
           const modelMap: Record<string, string> = {
             'claude-sonnet-4-5': 'claude-sonnet-4-5',
@@ -91,25 +90,25 @@ Retorne o roteiro completo melhorado:`;
             'claude-sonnet-3.5': 'claude-sonnet-4-5'
           };
           requestBody = {
-            model: modelMap[aiModel] || 'claude-sonnet-4-5',
+            model: modelMap[actualModel] || 'claude-sonnet-4-5',
             max_tokens: 16000,
             messages: [{ role: 'user', content: prompt }]
           };
-        } else if (aiModel.startsWith('gemini')) {
+        } else if (providerKey === 'gemini') {
           const modelMap: Record<string, string> = {
             'gemini-2.5-pro': 'gemini-2.0-flash-exp',
             'gemini-2.5-flash': 'gemini-2.0-flash-exp',
             'gemini-2.5-flash-lite': 'gemini-1.5-flash'
           };
-          const finalModel = modelMap[aiModel] || 'gemini-2.0-flash-exp';
+          const finalModel = modelMap[actualModel] || 'gemini-2.0-flash-exp';
           apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${finalModel}:generateContent?key=${apiKey}`;
           requestBody = {
             contents: [{ parts: [{ text: prompt }] }]
           };
-        } else if (aiModel.startsWith('gpt')) {
+        } else if (providerKey === 'openai') {
           apiUrl = 'https://api.openai.com/v1/chat/completions';
           requestBody = {
-            model: aiModel,
+            model: actualModel,
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 16000
           };
@@ -119,10 +118,10 @@ Retorne o roteiro completo melhorado:`;
           'Content-Type': 'application/json'
         };
 
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
-        } else if (aiModel.startsWith('gpt')) {
+        } else if (providerKey === 'openai') {
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
 
@@ -145,9 +144,9 @@ Retorne o roteiro completo melhorado:`;
 
         const data = await response.json();
         
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           return data.content[0].text;
-        } else if (aiModel.startsWith('gemini')) {
+        } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
           return data.candidates[0].content.parts[0].text;
         } else {
           return data.choices[0].message.content;

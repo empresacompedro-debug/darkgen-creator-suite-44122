@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { executeWithKeyRotation } from '../_shared/get-api-key.ts';
 import { validateString, validateOrThrow, sanitizeString, ValidationException } from '../_shared/validation.ts';
+import { mapModelToProvider } from '../_shared/model-mapper.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -68,52 +69,7 @@ serve(async (req) => {
     console.log(`Expanding niche: "${mainNiche}" in ${language}`);
 
     const prompt = `Você é um especialista em análise de nichos para YouTube.
-
-TAREFA: Analise o nível de especificidade do input fornecido e expanda em 2 níveis mais profundos.
-
-REGRAS DE DETECÇÃO:
-1. NICHO AMPLO (ex: "History", "Finance", "Technology"): 
-   - Tema muito genérico, pode abranger milhares de sub-tópicos
-   - Gere 200 nichos + 200 micro-nichos
-
-2. SUB-NICHO (ex: "World War 2 Battles", "Stock Trading", "AI Programming"):
-   - Já é uma categoria específica dentro de um tema maior
-   - Gere 200 micro-nichos + 200 tópicos ultra-específicos
-
-3. MICRO-NICHO (ex: "Rare WWII Photos", "Day Trading Crypto", "Python AI Libraries"):
-   - Tópico muito específico, já quase pronto para ser título de vídeo
-   - Gere 200 tópicos ultra-específicos + 200 ângulos únicos de conteúdo
-
-INPUT: "${mainNiche}"
-IDIOMA: ${language}
-
-INSTRUÇÕES CRÍTICAS:
-- Seja extremamente criativo e específico
-- Cada item deve ser único e relevante para YouTube
-- Micro-nichos devem ser tópicos que podem gerar vídeos de 10-30 minutos
-- Ultra-específicos devem ser praticamente títulos de vídeos prontos
-- Ângulos únicos devem ter hooks emocionais ou de curiosidade
-
-ESTRATÉGIAS PARA CRIAÇÃO DE TÍTULOS:
-
-ESTRATÉGIA 01 - ALTERAR O PERSONAGEM OU ADICIONAR UM ADJETIVO
-Exemplo:
-"Ela só pediu sobras de porco — então o fazendeiro a seguiu até em casa. O que ele viu mudou tudo."
-"Ela só pediu sobras de porco — então o fazendeiro milionário a seguiu até em casa. O que ele viu mudou tudo."
-"Ela só pediu sobras de porco — então o Capataz a seguiu até em casa. O que ele viu mudou tudo."
-
-ESTRATÉGIA 02 - CRIAR UMA VARIANTE DO TÍTULO MANTENDO A ESTRUTURA
-Exemplo:
-"Ela só pediu sobras de porco — então o fazendeiro a seguiu até em casa. O que ele viu mudou tudo."
-"Ela só pediu água do poço — então o fazendeiro a seguiu até em casa. O que ele viu mudou tudo."
-
-ESTRATÉGIA 03 - CRIAR UM TÍTULO NOVO FUNDINDO AS DUAS ESTRATÉGIAS
-Exemplo:
-"Ela só pediu sobras de porco — então o fazendeiro a seguiu até em casa. O que ele viu mudou tudo."
-"Ela só pediu água do poço — então o Capataz a seguiu até em casa. O que ele viu mudou tudo."
-
-ESTRATÉGIA 04 - CRIAR UM TÍTULO NOVO E INÉDITO DO ZERO
-
+...
 Retorne em formato JSON VÁLIDO (sem markdown):
 {
   "nivel_detectado": "amplo|sub-nicho|micro-nicho",
@@ -129,26 +85,24 @@ Retorne em formato JSON VÁLIDO (sem markdown):
   }
 }`;
 
-    let provider: 'claude' | 'openai' | 'gemini' = 'claude';
-    if (aiModel.startsWith('gpt')) provider = 'openai';
-    if (aiModel.startsWith('gemini')) provider = 'gemini';
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
 
     const result = await executeWithKeyRotation(
       userId,
-      provider,
+      providerKey,
       supabaseClient,
       async (apiKey) => {
         let apiUrl = '';
         let requestBody: any = {};
 
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           apiUrl = 'https://api.anthropic.com/v1/messages';
       const modelMap: Record<string, string> = {
         'claude-sonnet-4.5': 'claude-sonnet-4-5-20250929',
         'claude-sonnet-4': 'claude-sonnet-4-20250514',
         'claude-sonnet-3.5': 'claude-3-5-sonnet-20241022'
       };
-          const finalModel = modelMap[aiModel] || 'claude-sonnet-4-5';
+          const finalModel = modelMap[actualModel] || 'claude-sonnet-4-5';
           const maxTokens = getMaxTokensForModel(finalModel);
           console.log(`📦 [expand-niche] Usando ${maxTokens} max_tokens para ${finalModel}`);
           
@@ -157,40 +111,40 @@ Retorne em formato JSON VÁLIDO (sem markdown):
             max_tokens: maxTokens,
             messages: [{ role: 'user', content: prompt }]
           };
-        } else if (aiModel.startsWith('gemini')) {
+        } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
           // Modelos Gemini: usar API v1 para 2.5 e v1beta com -latest para 1.5
           let geminiModel: string;
           
-          if (aiModel === 'gemini-2.5-pro' || aiModel === 'gemini-2.5-flash') {
+          if (actualModel === 'gemini-2.5-pro' || actualModel === 'gemini-2.5-flash') {
             // Modelos 2.5: usar API v1
-            geminiModel = aiModel;
+            geminiModel = actualModel;
             apiUrl = `https://generativelanguage.googleapis.com/v1/models/${geminiModel}:generateContent?key=${apiKey}`;
-            console.log(`🔄 Usando API v1 para ${aiModel}`);
+            console.log(`🔄 Usando API v1 para ${actualModel}`);
           } else {
             // Modelos 1.5: usar API v1beta com sufixo -latest
             const modelMap: Record<string, string> = {
               'gemini-2.5-flash-lite': 'gemini-1.5-flash-8b-latest'
             };
-            geminiModel = modelMap[aiModel] || 'gemini-1.5-flash-latest';
+            geminiModel = modelMap[actualModel] || 'gemini-1.5-flash-latest';
             apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
-            console.log(`🔄 Usando API v1beta para ${aiModel} → ${geminiModel}`);
+            console.log(`🔄 Usando API v1beta para ${actualModel} → ${geminiModel}`);
           }
           
           requestBody = {
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
               temperature: 0.7,
-              maxOutputTokens: 16000  // Aumentado para 16K
+              maxOutputTokens: 16000
             }
           };
-        } else if (aiModel.startsWith('gpt')) {
+        } else if (providerKey === 'openai') {
           apiUrl = 'https://api.openai.com/v1/chat/completions';
-          const isReasoningModel = aiModel.startsWith('gpt-5') || aiModel.startsWith('o3-') || aiModel.startsWith('o4-');
-          const maxTokens = getMaxTokensForModel(aiModel);
-          console.log(`📦 [expand-niche] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${aiModel}`);
+          const isReasoningModel = actualModel.startsWith('gpt-5') || actualModel.startsWith('o3-') || actualModel.startsWith('o4-');
+          const maxTokens = getMaxTokensForModel(actualModel);
+          console.log(`📦 [expand-niche] Usando ${maxTokens} ${isReasoningModel ? 'max_completion_tokens' : 'max_tokens'} para ${actualModel}`);
           
           requestBody = {
-            model: aiModel,
+            model: actualModel,
             messages: [{ role: 'user', content: prompt }],
             ...(isReasoningModel 
               ? { max_completion_tokens: maxTokens }
@@ -203,10 +157,10 @@ Retorne em formato JSON VÁLIDO (sem markdown):
           'Content-Type': 'application/json'
         };
 
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           headers['x-api-key'] = apiKey;
           headers['anthropic-version'] = '2023-06-01';
-        } else if (aiModel.startsWith('gpt')) {
+        } else if (providerKey === 'openai') {
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
 
@@ -230,11 +184,11 @@ Retorne em formato JSON VÁLIDO (sem markdown):
         const aiData = await aiResponse.json();
         let resultText = '';
 
-        if (aiModel.startsWith('claude')) {
+        if (providerKey === 'claude') {
           resultText = aiData.content[0].text;
-        } else if (aiModel.startsWith('gemini')) {
+        } else if (providerKey === 'gemini' || providerKey === 'vertex-ai') {
           resultText = aiData.candidates[0].content.parts[0].text;
-        } else if (aiModel.startsWith('gpt')) {
+        } else if (providerKey === 'openai') {
           resultText = aiData.choices[0].message.content;
         }
         

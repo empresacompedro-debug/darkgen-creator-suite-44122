@@ -1,7 +1,9 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getApiKey, updateApiKeyUsage } from "../_shared/get-api-key.ts";
+import { getApiKey, updateApiKeyUsage, getApiKeyWithHierarchicalFallback } from "../_shared/get-api-key.ts";
+import { buildGeminiOrVertexRequest } from "../_shared/vertex-helpers.ts";
+import { mapModelToProvider } from "../_shared/model-mapper.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -65,16 +67,19 @@ serve(async (req) => {
 
     console.log(`[generate-scene-prompts-v2] Iniciando - Modelo: ${aiModel}, Script: ${script.length} chars, Personagens: ${Array.isArray(characters) ? characters.length : 0}`);
 
-    // Determine provider
-    const provider = aiModel.startsWith("claude") ? "claude" 
-                   : aiModel.startsWith("gemini") ? "gemini" 
-                   : "openai";
+    // Usar helper para mapear modelo → provider
+    const { provider: providerKey, model: actualModel } = mapModelToProvider(aiModel);
 
     // Get API key
-    const keyData = await getApiKey(userId, provider, supabaseClient);
+    const keyData = providerKey === 'vertex-ai'
+      ? await getApiKey(userId, 'vertex-ai', supabaseClient)
+      : providerKey === 'gemini'
+      ? await getApiKeyWithHierarchicalFallback(userId, 'gemini', supabaseClient)
+      : await getApiKey(userId, providerKey, supabaseClient);
+    
     if (!keyData) {
       return new Response(
-        JSON.stringify({ error: `Nenhuma chave de API encontrada para ${provider}. Configure em Configurações.` }),
+        JSON.stringify({ error: `Nenhuma chave de API encontrada para ${providerKey}. Configure em Configurações.` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -152,7 +157,7 @@ REGRAS:
     let requestBody: any;
     let requestHeaders: Record<string, string>;
 
-    if (provider === "claude") {
+    if (providerKey === "claude") {
       apiUrl = "https://api.anthropic.com/v1/messages";
       requestHeaders = {
         "Content-Type": "application/json",
@@ -160,30 +165,17 @@ REGRAS:
         "anthropic-version": "2023-06-01",
       };
       requestBody = {
-        model: aiModel,
+        model: actualModel,
         max_tokens: 4096,
         temperature: 0.7,
         messages: [{ role: "user", content: prompt }],
         stream: true,
       };
-    } else if (provider === "gemini") {
-      const geminiModel = aiModel.replace("gemini-", "gemini-");
-      apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?alt=sse&key=${apiKey}`;
-      requestHeaders = { "Content-Type": "application/json" };
-      requestBody = {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          topP: 0.95,
-          maxOutputTokens: 8192,
-        },
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-        ],
-      };
+    } else if (providerKey === "gemini" || providerKey === "vertex-ai") {
+      const { url, headers: apiHeaders, body } = await buildGeminiOrVertexRequest(keyData, actualModel, prompt, true);
+      apiUrl = url;
+      requestHeaders = apiHeaders;
+      requestBody = body;
     } else {
       // OpenAI
       apiUrl = "https://api.openai.com/v1/chat/completions";
@@ -192,26 +184,22 @@ REGRAS:
         "Authorization": `Bearer ${apiKey}`,
       };
       
-      // Determine if it's a newer model that doesn't support temperature
-      // GPT-4.1, GPT-5, O3, O4 models use max_completion_tokens and DON'T support temperature
-      const isNewerModel = aiModel.includes("gpt-4.1") || 
-                          aiModel.includes("gpt-5") || 
-                          aiModel.includes("o3-") || 
-                          aiModel.includes("o4-");
+      const isNewerModel = actualModel.includes("gpt-4.1") || 
+                          actualModel.includes("gpt-5") || 
+                          actualModel.includes("o3-") || 
+                          actualModel.includes("o4-");
       
       if (isNewerModel) {
-        // Newer models: use max_completion_tokens, NO temperature
         requestBody = {
-          model: aiModel,
+          model: actualModel,
           messages: [{ role: "user", content: prompt }],
           max_completion_tokens: 4096,
           stream: true,
         };
         console.log(`[generate-scene-prompts-v2] Using newer model parameters (max_completion_tokens, no temperature)`);
       } else {
-        // Legacy models (gpt-4o, gpt-4o-mini): use max_tokens and temperature
         requestBody = {
-          model: aiModel,
+          model: actualModel,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.7,
           max_tokens: 4096,
@@ -221,7 +209,7 @@ REGRAS:
       }
     }
 
-    console.log(`[generate-scene-prompts-v2] Chamando ${provider} API...`);
+    console.log(`[generate-scene-prompts-v2] Chamando ${providerKey} API...`);
 
     const apiResponse = await fetch(apiUrl, {
       method: "POST",
@@ -231,7 +219,7 @@ REGRAS:
 
     if (!apiResponse.ok) {
       const errorText = await apiResponse.text();
-      console.error(`[generate-scene-prompts-v2] Erro API ${provider}:`, apiResponse.status, errorText);
+      console.error(`[generate-scene-prompts-v2] Erro API ${providerKey}:`, apiResponse.status, errorText);
       
       // Handle specific errors
       if (apiResponse.status === 429) {
@@ -241,7 +229,7 @@ REGRAS:
         );
       }
       
-      if (provider === "gemini" && errorText.includes("safety")) {
+      if (providerKey === "gemini" && errorText.includes("safety")) {
         return new Response(
           JSON.stringify({ error: "Conteúdo bloqueado por políticas de segurança. Tente ajustar o roteiro ou usar outro modelo (Claude/GPT)." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -249,7 +237,7 @@ REGRAS:
       }
 
       return new Response(
-        JSON.stringify({ error: `Erro ao chamar ${provider}: ${errorText}` }),
+        JSON.stringify({ error: `Erro ao chamar ${providerKey}: ${errorText}` }),
         { status: apiResponse.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -263,13 +251,13 @@ REGRAS:
         let buffer = "";
         let totalChunks = 0;
 
-        console.log(`[generate-scene-prompts-v2] ✅ Iniciando streaming de ${provider}...`);
+        console.log(`[generate-scene-prompts-v2] ✅ Iniciando streaming de ${providerKey}...`);
 
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) {
-              console.log(`[generate-scene-prompts-v2] 🏁 Stream do ${provider} concluído. Total de chunks enviados: ${totalChunks}`);
+              console.log(`[generate-scene-prompts-v2] 🏁 Stream do ${providerKey} concluído. Total de chunks enviados: ${totalChunks}`);
               break;
             }
 
@@ -281,7 +269,7 @@ REGRAS:
               const trimmedLine = line.trim();
               if (!trimmedLine || trimmedLine.startsWith(":")) continue;
 
-              if (provider === "claude") {
+              if (providerKey === "claude") {
                 if (trimmedLine.startsWith("data: ")) {
                   const data = trimmedLine.slice(6);
                   if (data === "[DONE]") continue;
@@ -299,7 +287,7 @@ REGRAS:
                     console.error("[generate-scene-prompts-v2] ❌ Parse error (Claude):", e);
                   }
                 }
-              } else if (provider === "gemini") {
+              } else if (providerKey === "gemini" || providerKey === "vertex-ai") {
                 if (trimmedLine.startsWith("data: ")) {
                   const data = trimmedLine.slice(6);
                   try {
@@ -344,7 +332,7 @@ REGRAS:
           
           // Update API key usage
           if (userId && keyId && keyId !== 'global') {
-            await updateApiKeyUsage(userId, provider, supabaseClient, keyId);
+            await updateApiKeyUsage(userId, providerKey, supabaseClient, keyId);
           }
           
           controller.close();
