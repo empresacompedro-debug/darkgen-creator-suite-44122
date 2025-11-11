@@ -17,6 +17,8 @@ export default function TitleAnalysis() {
   const [aiModel, setAiModel] = useState("claude-sonnet-4-5");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const { toast } = useToast();
 
   const analyzeData = async () => {
@@ -30,20 +32,69 @@ export default function TitleAnalysis() {
     }
 
     setLoading(true);
+    setIsStreaming(true);
+    setStreamingText("");
+    setResult(null);
+
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-titles', {
-        body: { rawData, aiModel }
-      });
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-titles-stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ rawData, aiModel })
+        }
+      );
 
-      if (error) throw error;
+      if (!response.ok) {
+        throw new Error('Erro ao iniciar análise');
+      }
 
-      setResult(data);
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedText = "";
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') break;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.text) {
+                accumulatedText += parsed.text;
+                setStreamingText(accumulatedText);
+              }
+            } catch (e) {
+              console.error('Erro ao parsear chunk:', e);
+            }
+          }
+        }
+      }
+
+      setIsStreaming(false);
+      setResult({ markdownReport: accumulatedText });
+      
       toast({
         title: "✅ Análise concluída!",
-        description: `Análise realizada com sucesso`
+        description: "Análise realizada com sucesso"
       });
     } catch (error: any) {
       console.error("Erro na análise:", error);
+      setIsStreaming(false);
       toast({
         title: "❌ Erro na análise",
         description: error.message,
@@ -126,8 +177,25 @@ há 12 horas
         </CardContent>
       </Card>
 
+      {/* Streaming em tempo real */}
+      {isStreaming && streamingText && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              IA trabalhando...
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <div className="whitespace-pre-wrap text-foreground">{streamingText}</div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Resultados */}
-      {result && (
+      {result && !isStreaming && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-foreground">🎯 Relatório Completo</h2>
