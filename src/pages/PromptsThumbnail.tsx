@@ -47,6 +47,7 @@ const PromptsThumbnail = () => {
   const [provider, setProvider] = useState<"pollinations" | "huggingface">("pollinations");
   const [imageModel, setImageModel] = useState("pollinations");
   const [huggingfaceModel, setHuggingfaceModel] = useState("flux-schnell");
+  const [selectedAIModel, setSelectedAIModel] = useState("gemini-2.5-flash");
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [isModeling, setIsModeling] = useState(false);
   const [modelingResults, setModelingResults] = useState<any>(null);
@@ -281,6 +282,7 @@ const PromptsThumbnail = () => {
             quantity: modelingQuantity,
             imageGenerator: provider,
             imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
+            aiModel: selectedAIModel
           }
         });
 
@@ -304,8 +306,8 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
-          ai_analysis: '',
-          ai_model: '',
+          ai_analysis: data.aiAnalysis || null,
+          ai_model: data.aiModel || null,
           user_id: user?.id
         });
 
@@ -340,6 +342,7 @@ const PromptsThumbnail = () => {
             quantity: modelingQuantity,
             imageGenerator: provider,
             imageModel: provider === 'huggingface' ? huggingfaceModel : imageModel,
+            aiModel: selectedAIModel
           }
         });
 
@@ -363,8 +366,8 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
-          ai_analysis: '',
-          ai_model: '',
+          ai_analysis: data.aiAnalysis || null,
+          ai_model: data.aiModel || null,
           user_id: user?.id
         });
 
@@ -739,6 +742,23 @@ const PromptsThumbnail = () => {
                     value={modelingQuantity}
                     onChange={(e) => setModelingQuantity(parseInt(e.target.value) || 1)}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>🤖 Modelo de IA para Análise</Label>
+                  <Select value={selectedAIModel} onValueChange={setSelectedAIModel}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido)</SelectItem>
+                      <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Preciso)</SelectItem>
+                      <SelectItem value="gpt-4o">GPT-4o (Visão)</SelectItem>
+                      <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
+                      <SelectItem value="claude-sonnet-4.5">Claude Sonnet 4.5</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    IA com visão para analisar a imagem de referência
+                  </p>
                 </div>
 
                 <div className="space-y-3">

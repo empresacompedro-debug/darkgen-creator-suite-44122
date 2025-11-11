@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getApiKey, updateApiKeyUsage } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -34,40 +35,311 @@ const POLLINATIONS_MODELS: Record<string, string> = {
 // HELPER FUNCTIONS
 // ========================================
 
-function createPrompt(modelingLevel: string, customInstructions?: string): string {
+function getAnalysisPrompt(modelingLevel: string, customInstructions?: string): string {
   const basePrompts: Record<string, string> = {
-    identical: `Create an IDENTICAL thumbnail to this reference image. 
-REQUIREMENTS FOR IDENTICAL COPY:
-- Same composition and layout
-- Same colors and color scheme
-- Same text placement (if any)
-- Same visual style and aesthetic
-- Recreate it as faithfully as possible
+    identical: `Analise esta thumbnail de YouTube EM DETALHES EXTREMOS para criar uma cópia IDÊNTICA.
+
+EXTRAIA E DESCREVA MINUCIOSAMENTE:
+
+📐 COMPOSIÇÃO E LAYOUT:
+- Posição exata de cada elemento (esquerda/direita/centro, percentuais)
+- Divisão do espaço (split-screen? que proporção?)
+- Camadas visuais (frente, meio, fundo)
+- Pontos focais e hierarquia visual
+
+🎨 CORES E ESTILO VISUAL:
+- Paleta de cores EXATA (tons, saturação, contrastes)
+- Gradientes ou cores sólidas? Onde?
+- Efeitos visuais (glow, sombras, bordas, outlines)
+- Estilo artístico (realista, cartoon, 3D, flat design?)
+
+✍️ TEXTO E TIPOGRAFIA:
+- Texto EXATO (todas as palavras, maiúsculas, minúsculas)
+- Fonte (bold, italic, outline, shadow?)
+- Tamanho relativo de cada texto
+- Posicionamento EXATO de cada texto
+- Cores do texto
+- Efeitos no texto (stroke, glow, 3D?)
+
+👤 PESSOAS/PERSONAGENS:
+- Quantas pessoas? Características físicas
+- Poses, expressões, gestos
+- Roupas e acessórios
+- Posição na composição
+
+🎬 ELEMENTOS VISUAIS:
+- Todos os objetos/ícones/símbolos presentes
+- Backgrounds (texturas, padrões, imagens)
+- Efeitos especiais (fogo, água, luz, partículas)
+- Elementos decorativos
+
+FORNEÇA UMA DESCRIÇÃO CIRÚRGICA que permitirá recriar PIXEL POR PIXEL esta thumbnail.
 
 ${customInstructions || ''}`,
 
-    similar: `Create a SIMILAR thumbnail inspired by this design. 
-REQUIREMENTS FOR SIMILAR VERSION:
-- Keep the same general composition structure
-- Use similar color palette
-- Maintain the same visual impact and style
-- Can vary text and specific elements slightly
-- Should be recognizable as inspired by the original
+    similar: `Analise esta thumbnail de YouTube para criar uma versão SIMILAR mantendo o mesmo impacto visual.
+
+EXTRAIA OS ELEMENTOS-CHAVE:
+
+📐 ESTRUTURA FUNDAMENTAL:
+- Layout geral (divisão de espaços, simetria)
+- Tipo de composição (split-screen, centralizado, etc)
+- Hierarquia visual principal
+
+🎨 IDENTIDADE VISUAL:
+- Esquema de cores dominante
+- Estilo artístico (cartoon, realista, 3D, minimalista)
+- Mood/atmosfera (energético, calmo, dramático)
+- Elementos visuais principais
+
+✍️ TEXTOS E MENSAGEM:
+- Mensagem central (tema, conceito)
+- Estilo de texto (tamanho relativo, posição)
+- Palavras-chave ou frases importantes
+
+👤 ELEMENTOS HUMANOS:
+- Presença de pessoas? Quantas? Como?
+- Expressões e emoções transmitidas
+
+🎯 CONCEITO GERAL:
+- Qual a proposta da thumbnail?
+- Que emoção ela busca causar?
+- Elementos que NÃO podem mudar
+- Elementos que PODEM variar
+
+FORNEÇA uma análise que permita criar uma versão similar mas não idêntica.
 
 ${customInstructions || ''}`,
 
-    concept: `Create a NEW thumbnail based on the CONCEPT of this image.
-REQUIREMENTS FOR CONCEPT-BASED:
-- Extract the core idea and message
-- Reimagine with fresh composition
-- Use different but complementary colors
-- Create new text and visual elements
-- Maintain the emotional impact
+    concept: `Analise esta thumbnail de YouTube para extrair seu CONCEITO CENTRAL e permitir uma reimaginação criativa.
+
+IDENTIFIQUE:
+
+🎯 CONCEITO CORE:
+- Qual a mensagem/ideia PRINCIPAL?
+- Que sentimento deve transmitir?
+- Qual o objetivo desta thumbnail?
+
+🧠 ELEMENTOS CONCEITUAIS:
+- Tema/assunto do vídeo
+- Tom emocional (informativo, dramático, divertido, sério)
+- Target audience (público-alvo provável)
+
+🎨 ESCOLHAS CRIATIVAS:
+- Por que essas cores foram escolhidas?
+- Por que essa composição?
+- Que princípios de design estão sendo usados?
+
+✨ POSSIBILIDADES DE REIMAGINAÇÃO:
+- Que elementos podem ser completamente diferentes?
+- Que sentimento DEVE ser mantido?
+- Como transmitir a mesma mensagem de forma diferente?
+
+FORNEÇA uma análise CONCEITUAL que permita criar algo completamente novo mas com o mesmo impacto.
 
 ${customInstructions || ''}`
   };
 
   return basePrompts[modelingLevel] || basePrompts.similar;
+}
+
+async function analyzeImageWithAI(
+  imageBase64: string,
+  modelingLevel: string,
+  aiModel: string,
+  customInstructions: string | undefined,
+  userId: string,
+  supabaseClient: any
+): Promise<string> {
+  console.log(`🔍 Analisando imagem com ${aiModel}`);
+  
+  const analysisPrompt = getAnalysisPrompt(modelingLevel, customInstructions);
+  
+  // Get API key based on model
+  let provider: 'claude' | 'gemini' | 'openai';
+  if (aiModel.startsWith('claude')) {
+    provider = 'claude';
+  } else if (aiModel.startsWith('gemini')) {
+    provider = 'gemini';
+  } else if (aiModel.startsWith('gpt')) {
+    provider = 'openai';
+  } else {
+    throw new Error('Modelo de IA inválido. Use claude, gemini ou gpt');
+  }
+  
+  const keyData = await getApiKey(userId, provider, supabaseClient);
+  if (!keyData) {
+    throw new Error(`❌ Nenhuma chave ${provider.toUpperCase()} configurada. Configure em Configurações → Chaves de API`);
+  }
+  
+  console.log(`🔑 Usando chave ${provider}`);
+  
+  let analysis = '';
+  
+  // Call appropriate API based on model
+  if (provider === 'claude') {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': keyData.key,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: aiModel,
+        max_tokens: 4000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: imageBase64.replace(/^data:image\/[a-z]+;base64,/, '')
+              }
+            },
+            {
+              type: 'text',
+              text: analysisPrompt
+            }
+          ]
+        }]
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Claude API Error: ${error}`);
+    }
+    
+    const data = await response.json();
+    analysis = data.content[0].text;
+    
+  } else if (provider === 'gemini') {
+    const cleanBase64 = imageBase64.replace(/^data:image\/[a-z]+;base64,/, '');
+    
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${keyData.key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: analysisPrompt },
+              {
+                inline_data: {
+                  mime_type: 'image/jpeg',
+                  data: cleanBase64
+                }
+              }
+            ]
+          }]
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Gemini API Error: ${error}`);
+    }
+    
+    const data = await response.json();
+    analysis = data.candidates[0].content.parts[0].text;
+    
+  } else if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${keyData.key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: aiModel,
+        max_tokens: 4000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: analysisPrompt
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: imageBase64
+              }
+            }
+          ]
+        }]
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenAI API Error: ${error}`);
+    }
+    
+    const data = await response.json();
+    analysis = data.choices[0].message.content;
+  }
+  
+  // Update API key usage
+  await updateApiKeyUsage(userId, keyData.keyId, supabaseClient);
+  
+  console.log(`✅ Análise concluída (${analysis.length} caracteres)`);
+  return analysis;
+}
+
+function createGenerationPrompt(analysis: string, modelingLevel: string): string {
+  const instructions: Record<string, string> = {
+    identical: `Com base na análise detalhada abaixo, crie uma thumbnail de YouTube IDÊNTICA à original.
+
+ANÁLISE DA THUMBNAIL ORIGINAL:
+${analysis}
+
+INSTRUÇÕES CRÍTICAS:
+- Recrie EXATAMENTE como descrito na análise
+- Mesma composição, mesmas cores, mesmos elementos
+- Textos IDÊNTICOS (mesmas palavras, mesma tipografia)
+- Mesmas poses e expressões
+- FIDELIDADE MÁXIMA à descrição
+
+Crie uma thumbnail profissional de YouTube em alta qualidade (1280x720px).`,
+
+    similar: `Com base na análise abaixo, crie uma thumbnail de YouTube SIMILAR mantendo o mesmo impacto visual.
+
+ANÁLISE DA THUMBNAIL DE REFERÊNCIA:
+${analysis}
+
+INSTRUÇÕES:
+- Mantenha a ESTRUTURA geral da composição
+- Use PALETA DE CORES similar
+- Mantenha o ESTILO VISUAL e mood
+- Pode variar textos específicos mas mantenha a mensagem
+- Mantenha elementos-chave mas pode ajustar detalhes
+- DEVE SER RECONHECÍVEL como inspirada na original
+
+Crie uma thumbnail profissional de YouTube em alta qualidade (1280x720px).`,
+
+    concept: `Com base na análise conceitual abaixo, crie uma thumbnail de YouTube NOVA baseada no mesmo conceito.
+
+ANÁLISE CONCEITUAL:
+${analysis}
+
+INSTRUÇÕES:
+- Capture a ESSÊNCIA e mensagem principal
+- Reimagine completamente a composição
+- Use cores e elementos DIFERENTES mas complementares
+- Crie novos textos mantendo a ideia central
+- INOVE mas mantenha o mesmo impacto emocional
+- Deve transmitir a MESMA MENSAGEM de forma diferente
+
+Crie uma thumbnail profissional de YouTube em alta qualidade (1280x720px).`
+  };
+
+  return instructions[modelingLevel] || instructions.similar;
 }
 
 async function getUserHuggingFaceToken(userId: string): Promise<string | null> {
@@ -244,7 +516,8 @@ serve(async (req) => {
       quantity, 
       imageGenerator, 
       imageModel,
-      customInstructions
+      customInstructions,
+      aiModel = 'gemini-2.5-flash'
     } = await req.json();
 
     // Validations
@@ -266,11 +539,24 @@ serve(async (req) => {
 
     console.log('🎨 Starting thumbnail modeling');
     console.log(`📊 Generator: ${imageGenerator} | Model: ${imageModel} | Level: ${modelingLevel}`);
+    console.log(`🤖 AI Model: ${aiModel}`);
     console.log(`🔢 Quantity: ${quantity}`);
 
-    // Create prompt based on modeling level
-    const prompt = createPrompt(modelingLevel, customInstructions);
-    console.log(`📝 Prompt created (${prompt.length} chars)`);
+    // STEP 1: Analyze the reference image with AI (vision)
+    const imageAnalysis = await analyzeImageWithAI(
+      imageBase64,
+      modelingLevel,
+      aiModel,
+      customInstructions,
+      user.id,
+      supabase
+    );
+    
+    console.log(`📊 Análise completa: ${imageAnalysis.substring(0, 200)}...`);
+
+    // STEP 2: Create generation prompt based on analysis
+    const prompt = createGenerationPrompt(imageAnalysis, modelingLevel);
+    console.log(`📝 Prompt de geração criado (${prompt.length} chars)`);
 
     // Get token for HuggingFace if needed
     let hfToken = '';
@@ -328,7 +614,9 @@ serve(async (req) => {
         quantity: generatedImages.length,
         provider: imageGenerator,
         model: imageModel,
-        modelingLevel
+        modelingLevel,
+        aiAnalysis: imageAnalysis,
+        aiModel
       }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
