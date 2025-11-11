@@ -44,6 +44,8 @@ const Configuracoes = () => {
   const [bulkImportText, setBulkImportText] = useState("");
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [bulkImportProvider, setBulkImportProvider] = useState<string>("");
+  const [savingProvider, setSavingProvider] = useState<string | null>(null);
+  const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
     loadUserData();
@@ -125,6 +127,44 @@ const Configuracoes = () => {
     }
   };
 
+  const loadApiKeysForProvider = async (userId: string, provider: string) => {
+    try {
+      console.log(`🔄 [LoadKeys] Recarregando apenas ${provider}...`);
+      
+      const { data, error } = await supabase
+        .from('user_api_keys')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('api_provider', provider)
+        .order('priority', { ascending: true });
+
+      if (error) throw error;
+
+      const keys: ApiKey[] = data?.map((key: any) => ({
+        id: key.id,
+        key: '••••••••••••••••',
+        is_active: key.is_active,
+        priority: key.priority || 1,
+        is_current: key.is_current || false,
+        last_used_at: key.last_used_at
+      })) || [];
+
+      // Atualizar APENAS o provider específico (evita race condition)
+      const setters = {
+        youtube: setYoutubeKeys,
+        gemini: setGeminiKeys,
+        claude: setClaudeKeys,
+        openai: setOpenaiKeys,
+        huggingface: setHuggingfaceKeys
+      };
+      
+      setters[provider as keyof typeof setters]?.(keys);
+      console.log(`✅ [LoadKeys] ${provider} recarregado: ${keys.length} chave(s)`);
+    } catch (error: any) {
+      console.error(`❌ [LoadKeys] Erro ao recarregar ${provider}:`, error);
+    }
+  };
+
   const handleSave = async (provider: string, keys: ApiKey[]) => {
     if (!user) {
       toast({ title: "Erro", description: "Usuário não autenticado", variant: "destructive" });
@@ -132,6 +172,8 @@ const Configuracoes = () => {
     }
 
     const PLACEHOLDER = '••••••••••••••••';
+    setSavingProvider(provider);
+    setSaveProgress({ current: 0, total: 0 });
 
     try {
       // Separar o que é atualização (chaves já existentes) do que é inserção (novas chaves)
@@ -140,36 +182,50 @@ const Configuracoes = () => {
       const existingToUpdate = keys.filter((k) => isUUID(k.id) && k.key === PLACEHOLDER);
       const newToInsert = keys.filter((k) => !isUUID(k.id) && k.key.trim() && k.key !== PLACEHOLDER);
 
-      console.log(`🔐 Processando ${existingToUpdate.length} atualização(ões) e ${newToInsert.length} nova(s) chave(s) para ${provider}...`);
+      console.log(`📊 [HandleSave] Iniciando salvamento para ${provider}`, {
+        provider,
+        totalKeys: keys.length,
+        existingToUpdate: existingToUpdate.length,
+        newToInsert: newToInsert.length
+      });
 
       // 1) Atualizar prioridades das chaves existentes (sem sobrescrever o valor da key)
-      for (let i = 0; i < existingToUpdate.length; i++) {
-        const k = existingToUpdate[i];
-        const { error: updateError } = await supabase
-          .from('user_api_keys')
-          .update({ priority: k.priority, updated_at: new Date().toISOString() })
-          .eq('id', k.id);
-        if (updateError) {
-          console.error('❌ Erro ao atualizar prioridade:', updateError);
-          throw new Error(`Erro ao atualizar prioridade da chave ${i + 1}: ${updateError.message}`);
+      if (existingToUpdate.length > 0) {
+        console.log(`🔄 [HandleSave] Atualizando ${existingToUpdate.length} prioridades...`);
+        for (let i = 0; i < existingToUpdate.length; i++) {
+          const k = existingToUpdate[i];
+          const { error: updateError } = await supabase
+            .from('user_api_keys')
+            .update({ priority: k.priority, updated_at: new Date().toISOString() })
+            .eq('id', k.id);
+          if (updateError) {
+            console.error('❌ Erro ao atualizar prioridade:', updateError);
+            throw new Error(`Erro ao atualizar prioridade da chave ${i + 1}: ${updateError.message}`);
+          }
         }
+        console.log(`✅ [HandleSave] Prioridades atualizadas`);
       }
 
-      // 2) Inserir novas chaves (criptografadas)
-      for (let i = 0; i < newToInsert.length; i++) {
-        const k = newToInsert[i];
-        console.log(`🔑 Criptografando nova chave ${i + 1}/${newToInsert.length}...`);
-        const { data: encryptedKey, error: encryptError } = await supabase
-          .rpc('encrypt_api_key', { p_key: k.key.trim(), p_user_id: user.id });
-        if (encryptError) {
-          console.error('❌ Erro ao criptografar:', encryptError);
-          throw new Error(`Erro ao criptografar chave ${i + 1}: ${encryptError.message}`);
-        }
-
-        console.log(`💾 Inserindo nova chave ${i + 1} no banco...`);
-        const { error: insertError } = await supabase
-          .from('user_api_keys')
-          .insert({
+      // 2) Batch Insert: Preparar TODAS as chaves primeiro
+      if (newToInsert.length > 0) {
+        setSaveProgress({ current: 0, total: newToInsert.length });
+        console.log(`🔐 [HandleSave] Criptografando ${newToInsert.length} chave(s)...`);
+        
+        const preparedKeys = [];
+        for (let i = 0; i < newToInsert.length; i++) {
+          const k = newToInsert[i];
+          setSaveProgress({ current: i + 1, total: newToInsert.length });
+          console.log(`🔑 Criptografando chave ${i + 1}/${newToInsert.length}...`);
+          
+          const { data: encryptedKey, error: encryptError } = await supabase
+            .rpc('encrypt_api_key', { p_key: k.key.trim(), p_user_id: user.id });
+          
+          if (encryptError) {
+            console.error('❌ Erro ao criptografar:', encryptError);
+            throw new Error(`Erro ao criptografar chave ${i + 1}: ${encryptError.message}`);
+          }
+          
+          preparedKeys.push({
             user_id: user.id,
             api_provider: provider,
             api_key_encrypted: encryptedKey,
@@ -177,26 +233,55 @@ const Configuracoes = () => {
             priority: k.priority || 1,
             updated_at: new Date().toISOString(),
           });
+        }
+
+        console.log(`✅ [HandleSave] Criptografia completa. Inserindo ${preparedKeys.length} chave(s) no banco (batch)...`);
+        
+        // Batch Insert: TODAS de uma vez (atômico)
+        const { error: insertError } = await supabase
+          .from('user_api_keys')
+          .insert(preparedKeys);
+
         if (insertError) {
           console.error('❌ Erro ao inserir no banco:', insertError);
-          throw new Error(`Erro ao inserir chave ${i + 1}: ${insertError.message}`);
+          
+          // Tratar erro de duplicata
+          if (insertError.code === '23505') {
+            throw new Error('Uma ou mais chaves já existem no sistema. Remova duplicatas e tente novamente.');
+          }
+          
+          throw new Error(`Erro ao inserir chaves: ${insertError.message}`);
         }
+        
+        console.log(`✅ [HandleSave] Inserção completa (${preparedKeys.length} chave(s))`);
       }
 
-      // Feedback
-      await loadApiKeys(user.id);
+      // Recarregar APENAS o provider salvo (evita race condition)
+      console.log(`🔄 [HandleSave] Recarregando ${provider}...`);
+      await loadApiKeysForProvider(user.id, provider);
+      
       const total = existingToUpdate.length + newToInsert.length;
+      console.log(`✅ [HandleSave] Salvamento completo para ${provider}`, {
+        provider,
+        total,
+        newInserted: newToInsert.length,
+        prioritiesUpdated: existingToUpdate.length
+      });
+      
       toast({
-        title: 'Salvo!',
+        title: '✅ Salvo com Sucesso!',
         description: `${total} item(ns) processado(s). ${newToInsert.length} chave(s) adicionada(s) e ${existingToUpdate.length} prioridade(s) atualizada(s).`,
       });
     } catch (error: any) {
-      console.error('❌ Erro completo:', error);
+      console.error('❌ [HandleSave] Erro completo:', error);
       toast({
         title: 'Erro ao salvar',
         description: error.message || 'Erro desconhecido',
         variant: 'destructive',
       });
+    } finally {
+      setSavingProvider(null);
+      setSaveProgress({ current: 0, total: 0 });
     }
   };
   const addKey = (provider: string) => {
@@ -402,9 +487,24 @@ const Configuracoes = () => {
           </div>
         ))}
 
-        <Button onClick={() => handleSave(provider, keys)} className="w-full">
-          <Save className="h-4 w-4 mr-2" />
-          Salvar {title}
+        <Button 
+          onClick={() => handleSave(provider, keys)} 
+          disabled={savingProvider === provider}
+          className="w-full"
+        >
+          {savingProvider === provider ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {saveProgress.total > 0 
+                ? `Criptografando ${saveProgress.current}/${saveProgress.total}...`
+                : 'Salvando...'}
+            </>
+          ) : (
+            <>
+              <Save className="h-4 w-4 mr-2" />
+              Salvar {title}
+            </>
+          )}
         </Button>
       </div>
     </Card>
