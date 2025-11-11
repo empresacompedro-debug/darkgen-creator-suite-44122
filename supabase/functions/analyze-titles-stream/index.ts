@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { mapModelToProvider } from '../_shared/model-mapper.ts';
 import { buildGeminiOrVertexRequest } from '../_shared/vertex-helpers.ts';
+import { getApiKey } from '../_shared/get-api-key.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -186,6 +187,24 @@ IMPORTANTE:
         stream: true,
         messages: [{ role: 'user', content: prompt }],
       };
+    } else if (provider === 'vertex-ai') {
+      console.log('[analyze-titles-stream] Getting Vertex AI key from database');
+      const keyData = await getApiKey(userId || undefined, 'vertex-ai', supabase);
+      
+      if (!keyData) {
+        throw new Error('Nenhuma chave Vertex AI configurada');
+      }
+
+      const vertexRequest = await buildGeminiOrVertexRequest(
+        keyData,
+        model,
+        prompt,
+        true // streaming = true
+      );
+
+      streamUrl = vertexRequest.url;
+      headers = vertexRequest.headers;
+      requestBody = vertexRequest.body;
     } else {
       throw new Error(`Provider não suportado para streaming: ${provider}`);
     }
@@ -239,7 +258,7 @@ IMPORTANTE:
                     console.error('[analyze-titles-stream] Error parsing Claude chunk:', e);
                   }
                 }
-              } else if (provider === 'gemini') {
+              } else if (provider === 'gemini' || provider === 'vertex-ai') {
                 if (line.startsWith('data: ')) {
                   const data = line.slice(6).trim();
                   try {
@@ -249,7 +268,7 @@ IMPORTANTE:
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
                     }
                   } catch (e) {
-                    console.error('[analyze-titles-stream] Error parsing Gemini chunk:', e);
+                    console.error(`[analyze-titles-stream] Error parsing ${provider} chunk:`, e);
                   }
                 }
               } else if (provider === 'openai') {
