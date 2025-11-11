@@ -54,7 +54,21 @@ serve(async (req) => {
           valid = true;
           message = 'Chave Gemini válida e funcionando!';
         } else {
-          message = data.error?.message || 'Chave Gemini inválida';
+          // Distinção detalhada de erros
+          const errorCode = data.error?.code || response.status;
+          const errorMessage = data.error?.message || '';
+          
+          if (errorCode === 403 || errorMessage.includes('API_KEY_INVALID')) {
+            message = 'Chave Gemini INVÁLIDA (403 - não autorizada)';
+          } else if (errorCode === 429 || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota')) {
+            message = 'Chave Gemini com QUOTA ESGOTADA (429)';
+          } else if (errorCode === 400) {
+            message = 'Chave Gemini com FORMATO INVÁLIDO (400)';
+          } else if (errorCode >= 500) {
+            message = `Erro no servidor Google (${errorCode})`;
+          } else {
+            message = `Chave Gemini com erro: ${errorMessage || 'desconhecido'}`;
+          }
         }
         break;
       }
@@ -124,7 +138,16 @@ serve(async (req) => {
     console.log(`${provider} validation result:`, { valid, message });
 
     return new Response(
-      JSON.stringify({ valid, message, keyPrefix }), 
+      JSON.stringify({ 
+        valid, 
+        message, 
+        keyPrefix,
+        errorType: !valid ? (
+          message.includes('INVÁLIDA') || message.includes('FORMATO INVÁLIDO') ? 'INVALID_KEY' :
+          message.includes('QUOTA ESGOTADA') ? 'QUOTA_EXCEEDED' :
+          'UNKNOWN_ERROR'
+        ) : null
+      }), 
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }

@@ -46,6 +46,8 @@ const Configuracoes = () => {
   const [bulkImportProvider, setBulkImportProvider] = useState<string>("");
   const [savingProvider, setSavingProvider] = useState<string | null>(null);
   const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
+  const [validatingKeys, setValidatingKeys] = useState(false);
+  const [validationProgress, setValidationProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
     loadUserData();
@@ -359,32 +361,121 @@ const Configuracoes = () => {
     }
   };
 
-  const handleBulkImport = () => {
-    const lines = bulkImportText.trim().split('\n').filter(l => l.trim());
-    if (lines.length === 0) {
-      toast({ title: "Aviso", description: "Cole as chaves no campo de texto", variant: "default" });
+  const handleBulkImport = async () => {
+    if (!bulkImportText.trim()) {
+      toast({ title: "Erro", description: "Cole as chaves de API primeiro", variant: "destructive" });
       return;
     }
 
-    const newKeys: ApiKey[] = lines.map((line, index) => ({
-      id: `bulk-${Date.now()}-${index}`,
-      key: line.trim(),
-      is_active: true,
-      priority: index + 1,
-      is_current: false
-    }));
+    const lines = bulkImportText
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
 
-    switch(bulkImportProvider) {
-      case 'youtube': setYoutubeKeys([...youtubeKeys, ...newKeys]); break;
-      case 'gemini': setGeminiKeys([...geminiKeys, ...newKeys]); break;
-      case 'claude': setClaudeKeys([...claudeKeys, ...newKeys]); break;
-      case 'openai': setOpenaiKeys([...openaiKeys, ...newKeys]); break;
-      case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, ...newKeys]); break;
+    if (lines.length === 0) {
+      toast({ title: "Erro", description: "Nenhuma chave válida encontrada", variant: "destructive" });
+      return;
     }
 
-    toast({ title: "Importado!", description: `${lines.length} chave(s) importada(s)` });
+    // Validação em lote
+    toast({ title: "Validando...", description: `Testando ${lines.length} chave(s) de API...` });
+    setValidatingKeys(true);
+
+    const validationResults = await Promise.all(
+      lines.map(async (key, index) => {
+        setValidationProgress({ current: index + 1, total: lines.length });
+        
+        try {
+          const { data, error } = await supabase.functions.invoke('test-api-key', {
+            body: { provider: bulkImportProvider, apiKey: key }
+          });
+
+          if (error) throw error;
+
+          return {
+            key,
+            valid: data.valid,
+            message: data.message,
+            errorType: data.errorType,
+            keyPrefix: data.keyPrefix
+          };
+        } catch (err) {
+          console.error(`Erro ao validar chave ${index + 1}:`, err);
+          return {
+            key,
+            valid: false,
+            message: 'Erro de validação',
+            errorType: 'UNKNOWN_ERROR',
+            keyPrefix: key.substring(0, 12)
+          };
+        }
+      })
+    );
+
+    setValidatingKeys(false);
+    setValidationProgress({ current: 0, total: 0 });
+
+    // Contar resultados
+    const validCount = validationResults.filter(r => r.valid).length;
+    const invalidCount = validationResults.filter(r => r.errorType === 'INVALID_KEY').length;
+    const quotaCount = validationResults.filter(r => r.errorType === 'QUOTA_EXCEEDED').length;
+    const errorCount = validationResults.filter(r => r.errorType === 'UNKNOWN_ERROR').length;
+
+    // Criar chaves com status apropriado
+    const newKeys: ApiKey[] = validationResults.map((result, index) => ({
+      id: `bulk-${Date.now()}-${index}`,
+      key: result.key,
+      is_active: result.valid, // Apenas chaves válidas ficam ativas
+      priority: index + 1,
+      is_current: false,
+      last_used_at: null
+    }));
+
+    const setters = {
+      youtube: setYoutubeKeys,
+      gemini: setGeminiKeys,
+      claude: setClaudeKeys,
+      openai: setOpenaiKeys,
+      huggingface: setHuggingfaceKeys
+    };
+
+    const currentKeys = {
+      youtube: youtubeKeys,
+      gemini: geminiKeys,
+      claude: claudeKeys,
+      openai: openaiKeys,
+      huggingface: huggingfaceKeys
+    }[bulkImportProvider];
+
+    setters[bulkImportProvider]?.([...currentKeys, ...newKeys]);
+
+    // Toast detalhado com resultados
+    let toastMessage = '';
+    if (validCount > 0) toastMessage += `✅ ${validCount} válida(s) `;
+    if (quotaCount > 0) toastMessage += `⚠️ ${quotaCount} quota esgotada `;
+    if (invalidCount > 0) toastMessage += `❌ ${invalidCount} inválida(s) `;
+    if (errorCount > 0) toastMessage += `⚠️ ${errorCount} erro(s) `;
+
+    toast({ 
+      title: "Validação concluída!", 
+      description: toastMessage.trim(),
+      variant: validCount > 0 ? "default" : "destructive"
+    });
+
     setBulkImportText("");
     setBulkImportOpen(false);
+
+    // Auto-save prompt se houver chaves válidas
+    if (validCount > 0) {
+      const shouldSave = window.confirm(
+        `Deseja salvar as ${validCount} chave(s) válida(s) agora? (Recomendado)\n\n` +
+        `As chaves inválidas/quota esgotada serão marcadas como inativas.`
+      );
+
+      if (shouldSave) {
+        await handleSave(bulkImportProvider, [...currentKeys, ...newKeys]);
+      }
+    }
   };
 
 
@@ -417,9 +508,22 @@ const Configuracoes = () => {
                   placeholder="AIzaSyC...&#10;AIzaSyD...&#10;AIzaSyE..."
                   className="min-h-[200px] font-mono text-sm"
                 />
-                <Button onClick={handleBulkImport} className="w-full">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Importar {bulkImportText.trim().split('\n').filter(l => l.trim()).length} Chave(s)
+                <Button 
+                  onClick={handleBulkImport} 
+                  className="w-full"
+                  disabled={validatingKeys}
+                >
+                  {validatingKeys ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Validando {validationProgress.current}/{validationProgress.total}...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 mr-2" />
+                      Importar e Validar
+                    </>
+                  )}
                 </Button>
               </DialogContent>
             </Dialog>
