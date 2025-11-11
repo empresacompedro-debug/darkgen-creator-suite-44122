@@ -304,6 +304,8 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
+          ai_analysis: '',
+          ai_model: '',
           user_id: user?.id
         });
 
@@ -361,6 +363,8 @@ const PromptsThumbnail = () => {
           quantity: modelingQuantity,
           image_generator: provider,
           generated_images: data.generatedImages,
+          ai_analysis: '',
+          ai_model: '',
           user_id: user?.id
         });
 

@@ -1016,8 +1016,8 @@ export type Database = {
       }
       thumbnail_modelings: {
         Row: {
-          ai_analysis: string
-          ai_model: string
+          ai_analysis: string | null
+          ai_model: string | null
           created_at: string | null
           custom_instructions: string | null
           generated_images: Json
@@ -1030,8 +1030,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
-          ai_analysis: string
-          ai_model: string
+          ai_analysis?: string | null
+          ai_model?: string | null
           created_at?: string | null
           custom_instructions?: string | null
           generated_images?: Json
@@ -1044,8 +1044,8 @@ export type Database = {
           user_id: string
         }
         Update: {
-          ai_analysis?: string
-          ai_model?: string
+          ai_analysis?: string | null
+          ai_model?: string | null
           created_at?: string | null
           custom_instructions?: string | null
           generated_images?: Json
