@@ -16,11 +16,20 @@ serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) throw new Error('No authorization header');
 
-    const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_PUBLISHABLE_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } }
-    );
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_PUBLISHABLE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('❌ Missing environment variables:', { 
+        hasUrl: !!supabaseUrl, 
+        hasKey: !!supabaseKey 
+      });
+      throw new Error('Supabase configuration is missing');
+    }
+
+    const supabaseClient = createClient(supabaseUrl, supabaseKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
 
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) throw new Error('Unauthorized');
@@ -30,7 +39,12 @@ serve(async (req) => {
     if (!imageBase64) throw new Error('imageBase64 is required');
     if (!modelingLevel) throw new Error('modelingLevel is required');
 
-    console.log(`🎨 [Analyze Streaming] Starting analysis with ${aiModel} at level ${modelingLevel}`);
+    console.log(`🎨 [Analyze Streaming] Config:`, {
+      aiModel,
+      modelingLevel,
+      hasCustomInstructions: !!customInstructions,
+      imageSize: imageBase64.length
+    });
 
     // Determinar provider
     let provider: 'claude' | 'gemini' | 'openai' = 'gemini';
@@ -54,53 +68,120 @@ serve(async (req) => {
 
     // Criar prompts baseados no nível
     const systemPrompts = {
-      identical: `Você é um especialista em análise visual de thumbnails. Analise a imagem fornecida e crie um prompt EXTREMAMENTE DETALHADO para replicá-la de forma IDÊNTICA.
+      identical: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
 
-INSTRUÇÕES CRÍTICAS:
-- Descreva TODOS os elementos visuais com precisão fotográfica
-- Especifique cores exatas (tons, saturação, brilho)
-- Detalhe posicionamento preciso de CADA elemento
-- Descreva expressões faciais, ângulos de câmera, iluminação
-- Inclua TODOS os textos visíveis (fontes, tamanhos, cores, efeitos)
-- Mencione estilo artístico, técnicas de composição
-- Detalhe texturas, sombras, profundidade
-- Especifique resolução e qualidade esperadas
+Gere um prompt EXTREMAMENTE DETALHADO para recriar esta thumbnail de forma IDÊNTICA, incluindo:
 
-FORMATO: Crie um único prompt contínuo, sem seções, extremamente detalhado (mínimo 500 palavras).`,
+📌 TEMA E CONTEXTO NARRATIVO:
+- Sobre o que a imagem comunica (época, local, tipo de vídeo: histórico, curioso, educacional, etc.)
 
-      similar: `Você é um especialista em análise visual de thumbnails. Analise a imagem e crie um prompt DETALHADO que capture o ESTILO e ESSÊNCIA visual.
+📌 COMPOSIÇÃO VISUAL:
+- Número exato e posição precisa de pessoas ou objetos
+- Perspectiva, enquadramento, tipo de plano (close, plano médio, plano geral)
+- Fundo detalhado (cenário, elementos, profundidade)
+- Cores dominantes com especificações (tons exatos, saturação, temperatura)
+- Iluminação (direção, intensidade, sombras, contraste, hora do dia)
 
-INSTRUÇÕES:
-- Identifique e descreva o estilo visual dominante
-- Capture a paleta de cores principal
-- Descreva o layout e composição geral
-- Identifique padrões visuais e elementos recorrentes
-- Mencione técnicas artísticas utilizadas
-- Descreva mood, atmosfera e impacto visual
-- Inclua tipo de conteúdo (pessoa, objeto, paisagem, etc)
-- Especifique elementos de design (tipografia, efeitos, filtros)
+📌 ESTILO ARTÍSTICO/FOTOGRÁFICO:
+- Especifique: cinematográfico, vintage, digital painting, retrato realista, flat design, documental, hiper-realista, ilustração 3D, etc.
 
-FORMATO: Prompt detalhado (300-400 palavras) focando em ESTILO, não em replicação exata.`,
+📌 ATMOSFERA EMOCIONAL:
+- Sentimento transmitido: mistério, impacto, humor, tensão, curiosidade, esperança, nostalgia, drama, ação, etc.
 
-      concept: `Você é um especialista em análise conceitual de thumbnails. Analise a imagem e extraia o CONCEITO CENTRAL para reimaginação criativa.
+📌 TEXTO E TIPOGRAFIA (SE HOUVER):
+- Palavras EXATAS visíveis na imagem
+- Posição do texto (canto superior, centralizado, rodapé, etc.)
+- Tamanho relativo (grande, médio, pequeno)
+- Estilo da fonte (bold, serif, sans-serif, manuscrita, display)
+- Cores do texto
+- Efeitos aplicados: glow, sombra, outline, gradiente, 3D, neon
 
-INSTRUÇÕES:
-- Identifique o conceito/ideia principal transmitida
-- Capture a emoção e mensagem central
-- Descreva o tema e narrativa visual
-- Mencione elementos simbólicos e metafóricos
-- Analise o impacto psicológico da composição
-- Identifique arquétipos visuais utilizados
-- Sugira direções criativas para reimaginação
-- Foque em "O QUE" a imagem comunica, não "COMO"
+📌 DETALHES TÉCNICOS:
+- Tipo de lente/perspectiva (grande angular, teleobjetiva, normal)
+- Proporção: 16:9 (YouTube thumbnail)
+- Nível de realismo (fotográfico, semi-realista, estilizado)
+- Contraste (alto, médio, baixo)
+- Textura e granulação (lisa, texturizada, vintage, grão de filme)
+- Saturação das cores
+- Nitidez e foco
 
-FORMATO: Prompt conceitual (200-300 palavras) focando na IDEIA CENTRAL e possibilidades criativas.`
+FORMATO FINAL OBRIGATÓRIO:
+Após analisar todos esses elementos, reescreva TUDO como um único prompt fluido e direto para geração de imagem (formato Midjourney/Leonardo AI), unindo todos os elementos em uma descrição coesa.
+
+FINALIZE COM OS PARÂMETROS:
+--ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5
+
+EXEMPLO DE FORMATO ESPERADO:
+"Create a cinematic YouTube thumbnail showing [descrição completa da cena, pessoas, objetos, ação], featuring [estilos visuais], with [iluminação], [cores dominantes], [atmosfera emocional]. Text overlay '[texto exato]' in [estilo de fonte] with [efeitos]. [Detalhes técnicos adicionais]. --ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5"`,
+
+      similar: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
+
+Gere um prompt DETALHADO que capture o ESTILO e ESSÊNCIA visual desta thumbnail, incluindo:
+
+📌 TEMA E CONTEXTO:
+- Tipo de conteúdo e narrativa geral
+
+📌 COMPOSIÇÃO VISUAL:
+- Layout geral e elementos principais
+- Paleta de cores dominante
+- Tipo de iluminação e atmosfera
+
+📌 ESTILO ARTÍSTICO:
+- Estilo visual dominante (cinematográfico, vintage, moderno, etc.)
+- Técnicas artísticas identificadas
+
+📌 ATMOSFERA EMOCIONAL:
+- Mood e impacto visual desejado
+
+📌 TEXTO E TIPOGRAFIA:
+- Estilo geral de texto (se houver)
+- Posicionamento e efeitos
+
+📌 DETALHES TÉCNICOS:
+- Proporção: 16:9
+- Nível de estilização
+- Qualidade visual
+
+FORMATO FINAL OBRIGATÓRIO:
+Reescreva como um prompt único e fluido para Midjourney/Leonardo AI, focando em capturar o ESTILO mais do que detalhes exatos.
+
+FINALIZE COM:
+--ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5`,
+
+      concept: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
+
+Gere um prompt CONCEITUAL que extraia a IDEIA CENTRAL e permita reimaginação criativa, incluindo:
+
+📌 CONCEITO CENTRAL:
+- Ideia principal e mensagem transmitida
+
+📌 NARRATIVA VISUAL:
+- Tema e história contada
+- Elementos simbólicos
+
+📌 ATMOSFERA E EMOÇÃO:
+- Sentimento principal
+- Impacto psicológico
+
+📌 DIREÇÃO CRIATIVA:
+- Arquétipos visuais
+- Possibilidades de reimaginação
+
+📌 ELEMENTOS ESSENCIAIS:
+- O que DEVE estar presente
+- O que pode ser reinterpretado
+
+FORMATO FINAL OBRIGATÓRIO:
+Reescreva como um prompt único e fluido para Midjourney/Leonardo AI, focando no CONCEITO e permitindo liberdade criativa na execução.
+
+FINALIZE COM:
+--ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5`
     };
 
     let analysisPrompt = systemPrompts[modelingLevel as keyof typeof systemPrompts];
     
     if (customInstructions?.trim()) {
-      analysisPrompt += `\n\nINSTRUÇÕES ADICIONAIS DO USUÁRIO:\n${customInstructions}`;
+      analysisPrompt += `\n\n📌 INSTRUÇÕES PERSONALIZADAS DO USUÁRIO:\n${customInstructions}`;
     }
 
     // Criar streaming response
@@ -211,9 +292,15 @@ FORMATO: Prompt conceitual (200-300 palavras) focando na IDEIA CENTRAL e possibi
             }
 
             const data = await response.json();
-            const fullText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            let fullText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
             
             if (!fullText) throw new Error('No text generated from Gemini');
+
+            // Validar e adicionar parâmetros Midjourney se ausentes
+            if (!fullText.includes('--ar 16:9')) {
+              console.warn('⚠️ Generated prompt missing Midjourney parameters, adding them...');
+              fullText += '\n\n--ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5';
+            }
 
             // Simular streaming por sentenças (mais rápido e natural)
             const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [fullText];
