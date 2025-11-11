@@ -34,7 +34,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseClient.auth.getUser();
     if (!user) throw new Error('Unauthorized');
 
-    const { imageBase64, modelingLevel, aiModel, customInstructions } = await req.json();
+    const { imageBase64, modelingLevel, aiModel, customInstructions, includeText } = await req.json();
 
     if (!imageBase64) throw new Error('imageBase64 is required');
     if (!modelingLevel) throw new Error('modelingLevel is required');
@@ -42,6 +42,7 @@ serve(async (req) => {
     console.log(`🎨 [Analyze Streaming] Config:`, {
       aiModel,
       modelingLevel,
+      includeText: includeText ?? true,
       hasCustomInstructions: !!customInstructions,
       imageSize: imageBase64.length
     });
@@ -66,116 +67,113 @@ serve(async (req) => {
     if (!apiKeyResult) throw new Error(`No ${provider} API key found`);
     const apiKey = apiKeyResult.key;
 
-    // Criar prompts baseados no nível
+    // Criar prompts baseados no nível e modo de texto
+    const masterSystemPrompt = `🧠 PROMPT MESTRE — Interpretação e Modelagem de Thumbnails
+
+Você é um sistema especializado em interpretação visual de thumbnails de YouTube e geração de prompts técnicos detalhados para recriá-las em ferramentas de geração de imagem (Hugging Face, Pollinations, Stable Diffusion, Leonardo AI ou Midjourney).
+
+Sua tarefa é analisar e retornar um prompt técnico descritivo, completo e reproduzível, contendo:
+
+📌 TEMA E CONTEXTO — tipo de vídeo (histórico, curioso, emocional, educativo, etc.) e mensagem geral da thumbnail.
+
+📌 COMPOSIÇÃO VISUAL — número e posição das pessoas ou objetos, enquadramento, fundo, perspectiva e iluminação.
+
+📌 ESTILO ARTÍSTICO OU FOTOGRÁFICO — (cinematográfico, vintage, digital painting, hiper-realista, flat, etc.).
+
+📌 CORES E ATMOSFERA — paleta dominante, contraste, brilho e sensação visual.
+
+📌 TEXTO (SE HOUVER) — conteúdo exato do texto, cor, fonte, tamanho e posição (inferior, central, lateral).
+
+📌 OUTROS DETALHES TÉCNICOS — textura, tipo de lente, qualidade da imagem, profundidade de campo, ruído, e proporção recomendada (16:9).
+
+O estilo do texto deve ser técnico e objetivo, ideal para modelos como Hugging Face, Pollinations e Stable Diffusion, priorizando descrições concretas e evitando linguagem poética ou subjetiva.
+
+Importante: foque no que está visível, não no significado simbólico da imagem.
+
+RETORNE a análise em formato JSON com a seguinte estrutura:
+{
+  "prompt_com_texto": "descrição detalhada incluindo todo o texto presente",
+  "prompt_sem_texto": "a mesma descrição, mas omitindo qualquer texto",
+  "metadata": {
+    "tema": "string",
+    "estilo": "string",
+    "emocao": "string",
+    "paleta_cores": ["cor1", "cor2", "cor3"],
+    "quantidade_pessoas": number,
+    "plano": "string (close, médio, geral, etc)",
+    "epoca": "string",
+    "ambiente": "string"
+  }
+}`;
+
     const systemPrompts = {
-      identical: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
+      identical: `${masterSystemPrompt}
 
-Gere um prompt EXTREMAMENTE DETALHADO para recriar esta thumbnail de forma IDÊNTICA, incluindo:
+NÍVEL: IDÊNTICO - Recriação pixel-perfect
 
-📌 TEMA E CONTEXTO NARRATIVO:
-- Sobre o que a imagem comunica (época, local, tipo de vídeo: histórico, curioso, educacional, etc.)
+Analise cuidadosamente esta imagem com extremo requinte de detalhes.
 
-📌 COMPOSIÇÃO VISUAL:
-- Número exato e posição precisa de pessoas ou objetos
-- Perspectiva, enquadramento, tipo de plano (close, plano médio, plano geral)
-- Fundo detalhado (cenário, elementos, profundidade)
-- Cores dominantes com especificações (tons exatos, saturação, temperatura)
-- Iluminação (direção, intensidade, sombras, contraste, hora do dia)
+ANÁLISE REQUERIDA:
+- Descreva TODOS os elementos visuais com precisão fotográfica
+- Especifique cores exatas (tons, saturação, brilho)
+- Detalhe posicionamento preciso de CADA elemento
+- Descreva expressões faciais, ângulos de câmera, iluminação
+- Para prompt_com_texto: Inclua TODOS os textos visíveis (fontes, tamanhos, cores, efeitos, posição exata)
+- Para prompt_sem_texto: Omita completamente qualquer menção a texto
+- Mencione estilo artístico, técnicas de composição
+- Detalhe texturas, sombras, profundidade
+- Especifique resolução e qualidade esperadas
 
-📌 ESTILO ARTÍSTICO/FOTOGRÁFICO:
-- Especifique: cinematográfico, vintage, digital painting, retrato realista, flat design, documental, hiper-realista, ilustração 3D, etc.
+FORMATO DOS PROMPTS:
+Cada prompt (com_texto e sem_texto) deve ser um parágrafo fluido e técnico de 300-500 palavras, descrevendo a imagem de forma precisa e reproduzível para modelos de geração de imagem.
 
-📌 ATMOSFERA EMOCIONAL:
-- Sentimento transmitido: mistério, impacto, humor, tensão, curiosidade, esperança, nostalgia, drama, ação, etc.
+RETORNE APENAS O JSON, sem texto adicional antes ou depois.`,
 
-📌 TEXTO E TIPOGRAFIA (SE HOUVER):
-- Palavras EXATAS visíveis na imagem
-- Posição do texto (canto superior, centralizado, rodapé, etc.)
-- Tamanho relativo (grande, médio, pequeno)
-- Estilo da fonte (bold, serif, sans-serif, manuscrita, display)
-- Cores do texto
-- Efeitos aplicados: glow, sombra, outline, gradiente, 3D, neon
+      similar: `${masterSystemPrompt}
 
-📌 DETALHES TÉCNICOS:
-- Tipo de lente/perspectiva (grande angular, teleobjetiva, normal)
-- Proporção: 16:9 (YouTube thumbnail)
-- Nível de realismo (fotográfico, semi-realista, estilizado)
-- Contraste (alto, médio, baixo)
-- Textura e granulação (lisa, texturizada, vintage, grão de filme)
-- Saturação das cores
-- Nitidez e foco
+NÍVEL: SIMILAR - Captura de estilo e essência
 
-FORMATO FINAL OBRIGATÓRIO:
-Após analisar todos esses elementos, reescreva TUDO como um único prompt fluido e direto para geração de imagem (formato Midjourney/Leonardo AI), unindo todos os elementos em uma descrição coesa.
+Analise cuidadosamente esta imagem focando no ESTILO VISUAL DOMINANTE.
 
-FINALIZE COM OS PARÂMETROS:
---ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5
+ANÁLISE REQUERIDA:
+- Identifique e descreva o estilo visual dominante
+- Capture a paleta de cores principal
+- Descreva o layout e composição geral
+- Identifique padrões visuais e elementos recorrentes
+- Mencione técnicas artísticas utilizadas
+- Descreva mood, atmosfera e impacto visual
+- Inclua tipo de conteúdo (pessoa, objeto, paisagem, etc)
+- Para prompt_com_texto: Descreva o estilo geral e posicionamento do texto
+- Para prompt_sem_texto: Omita completamente qualquer menção a texto
+- Especifique elementos de design (efeitos, filtros)
 
-EXEMPLO DE FORMATO ESPERADO:
-"Create a cinematic YouTube thumbnail showing [descrição completa da cena, pessoas, objetos, ação], featuring [estilos visuais], with [iluminação], [cores dominantes], [atmosfera emocional]. Text overlay '[texto exato]' in [estilo de fonte] with [efeitos]. [Detalhes técnicos adicionais]. --ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5"`,
+FORMATO DOS PROMPTS:
+Cada prompt deve ser um parágrafo fluido e técnico de 200-300 palavras, focando em ESTILO, não em replicação exata.
 
-      similar: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
+RETORNE APENAS O JSON, sem texto adicional antes ou depois.`,
 
-Gere um prompt DETALHADO que capture o ESTILO e ESSÊNCIA visual desta thumbnail, incluindo:
+      concept: `${masterSystemPrompt}
 
-📌 TEMA E CONTEXTO:
-- Tipo de conteúdo e narrativa geral
+NÍVEL: CONCEITUAL - Ideia central e reimaginação
 
-📌 COMPOSIÇÃO VISUAL:
-- Layout geral e elementos principais
-- Paleta de cores dominante
-- Tipo de iluminação e atmosfera
+Analise esta imagem focando no CONCEITO e MENSAGEM CENTRAL.
 
-📌 ESTILO ARTÍSTICO:
-- Estilo visual dominante (cinematográfico, vintage, moderno, etc.)
-- Técnicas artísticas identificadas
+ANÁLISE REQUERIDA:
+- Identifique o conceito/ideia principal transmitida
+- Capture a emoção e mensagem central
+- Descreva o tema e narrativa visual
+- Mencione elementos simbólicos visuais (não metafóricos)
+- Analise o impacto visual da composição
+- Identifique arquétipos visuais utilizados
+- Sugira direções criativas para reimaginação
+- Para prompt_com_texto: Mencione o papel do texto na mensagem geral
+- Para prompt_sem_texto: Omita completamente qualquer menção a texto
+- Foque em "O QUE" a imagem comunica visualmente
 
-📌 ATMOSFERA EMOCIONAL:
-- Mood e impacto visual desejado
+FORMATO DOS PROMPTS:
+Cada prompt deve ser um parágrafo fluido e técnico de 150-250 palavras, focando na IDEIA CENTRAL e possibilidades criativas.
 
-📌 TEXTO E TIPOGRAFIA:
-- Estilo geral de texto (se houver)
-- Posicionamento e efeitos
-
-📌 DETALHES TÉCNICOS:
-- Proporção: 16:9
-- Nível de estilização
-- Qualidade visual
-
-FORMATO FINAL OBRIGATÓRIO:
-Reescreva como um prompt único e fluido para Midjourney/Leonardo AI, focando em capturar o ESTILO mais do que detalhes exatos.
-
-FINALIZE COM:
---ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5`,
-
-      concept: `Analise cuidadosamente esta imagem com extremo requinte de detalhes.
-
-Gere um prompt CONCEITUAL que extraia a IDEIA CENTRAL e permita reimaginação criativa, incluindo:
-
-📌 CONCEITO CENTRAL:
-- Ideia principal e mensagem transmitida
-
-📌 NARRATIVA VISUAL:
-- Tema e história contada
-- Elementos simbólicos
-
-📌 ATMOSFERA E EMOÇÃO:
-- Sentimento principal
-- Impacto psicológico
-
-📌 DIREÇÃO CRIATIVA:
-- Arquétipos visuais
-- Possibilidades de reimaginação
-
-📌 ELEMENTOS ESSENCIAIS:
-- O que DEVE estar presente
-- O que pode ser reinterpretado
-
-FORMATO FINAL OBRIGATÓRIO:
-Reescreva como um prompt único e fluido para Midjourney/Leonardo AI, focando no CONCEITO e permitindo liberdade criativa na execução.
-
-FINALIZE COM:
---ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5`
+RETORNE APENAS O JSON, sem texto adicional antes ou depois.`
     };
 
     let analysisPrompt = systemPrompts[modelingLevel as keyof typeof systemPrompts];
@@ -296,10 +294,16 @@ FINALIZE COM:
             
             if (!fullText) throw new Error('No text generated from Gemini');
 
-            // Validar e adicionar parâmetros Midjourney se ausentes
-            if (!fullText.includes('--ar 16:9')) {
-              console.warn('⚠️ Generated prompt missing Midjourney parameters, adding them...');
-              fullText += '\n\n--ar 16:9 --style cinematic --v 6 --quality 2 --chaos 5';
+            // Tentar extrair JSON da resposta
+            let jsonMatch = fullText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              try {
+                const parsedJson = JSON.parse(jsonMatch[0]);
+                // Se temos JSON válido, enviar como estrutura
+                fullText = JSON.stringify(parsedJson, null, 2);
+              } catch (e) {
+                console.warn('⚠️ Failed to parse JSON from response, sending as-is');
+              }
             }
 
             // Simular streaming por sentenças (mais rápido e natural)

@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { UserManual } from "@/components/thumbnail-prompt/UserManual";
 import { SubscriptionGuard } from "@/components/subscription/SubscriptionGuard";
+import { Switch } from "@/components/ui/switch";
 
 const PromptsThumbnail = () => {
   const { toast } = useToast();
@@ -46,8 +47,12 @@ const PromptsThumbnail = () => {
   // PASSO 1: Análise com streaming
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analyzedPrompt, setAnalyzedPrompt] = useState('');
+  const [promptWithText, setPromptWithText] = useState('');
+  const [promptWithoutText, setPromptWithoutText] = useState('');
+  const [promptMetadata, setPromptMetadata] = useState<any>(null);
   const [analysisComplete, setAnalysisComplete] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [includeTextMode, setIncludeTextMode] = useState(true);
   
   // PASSO 2: Geração
   const [showGenerationDialog, setShowGenerationDialog] = useState(false);
@@ -262,6 +267,9 @@ const PromptsThumbnail = () => {
 
     setIsAnalyzing(true);
     setAnalyzedPrompt('');
+    setPromptWithText('');
+    setPromptWithoutText('');
+    setPromptMetadata(null);
     setAnalysisComplete(false);
     setModelingResults([]);
 
@@ -292,7 +300,8 @@ const PromptsThumbnail = () => {
           imageBase64,
           modelingLevel,
           aiModel: selectedAIModel,
-          customInstructions
+          customInstructions,
+          includeText: includeTextMode
         }),
         signal: controller.signal // Adicionar signal para cancelamento
       });
@@ -306,6 +315,7 @@ const PromptsThumbnail = () => {
       const reader = response.body!.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let fullPromptText = ''; // Acumular todo o texto aqui localmente
 
       while (true) {
         const { done, value } = await reader.read();
@@ -323,10 +333,34 @@ const PromptsThumbnail = () => {
               setAnalysisComplete(true);
               setIsAnalyzing(false);
               setAbortController(null);
-              toast({
-                title: '✅ Análise Concluída!',
-                description: 'Prompt gerado com sucesso. Clique em MODELAR para continuar.'
-              });
+              
+              // Tentar fazer parse do JSON do texto completo acumulado
+              try {
+                const jsonMatch = fullPromptText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  const parsed = JSON.parse(jsonMatch[0]);
+                  setPromptWithText(parsed.prompt_com_texto || '');
+                  setPromptWithoutText(parsed.prompt_sem_texto || '');
+                  setPromptMetadata(parsed.metadata || null);
+                  
+                  toast({
+                    title: '✅ Análise Concluída!',
+                    description: 'Prompts estruturados gerados com sucesso.'
+                  });
+                } else {
+                  toast({
+                    title: '✅ Análise Concluída!',
+                    description: 'Prompt gerado com sucesso.'
+                  });
+                }
+              } catch (e) {
+                console.error('Error parsing JSON from prompt:', e);
+                toast({
+                  title: '✅ Análise Concluída!',
+                  description: 'Prompt gerado (formato não estruturado).'
+                });
+              }
+              
               return;
             }
 
@@ -336,6 +370,7 @@ const PromptsThumbnail = () => {
                 throw new Error(data.error);
               }
               if (data.text) {
+                fullPromptText += data.text; // Acumular aqui
                 setAnalyzedPrompt(prev => prev + data.text);
               }
             } catch (e) {
@@ -744,6 +779,26 @@ const PromptsThumbnail = () => {
                   />
                 </div>
 
+                {/* NOVO: Toggle para modo com/sem texto */}
+                <div className="flex items-center justify-between p-4 bg-muted rounded-lg mb-4">
+                  <div className="space-y-1">
+                    <Label className="text-base font-semibold">
+                      {includeTextMode ? "📝 Modo: Com Texto" : "🚫 Modo: Sem Texto"}
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {includeTextMode 
+                        ? "O prompt incluirá descrição de qualquer texto presente na imagem" 
+                        : "O prompt ignorará qualquer texto visível na imagem"
+                      }
+                    </p>
+                  </div>
+                  <Switch 
+                    checked={includeTextMode} 
+                    onCheckedChange={setIncludeTextMode}
+                    disabled={isAnalyzing}
+                  />
+                </div>
+
                 {/* Botão de análise */}
                 <div className="flex gap-2">
                   <Button 
@@ -775,75 +830,187 @@ const PromptsThumbnail = () => {
                   )}
                 </div>
 
-                {/* Área de streaming do prompt */}
-                {(isAnalyzing || analyzedPrompt) && (
+                {/* Área de streaming e exibição dos prompts estruturados */}
+                {(isAnalyzing || analyzedPrompt || promptWithText || promptWithoutText) && (
                   <Card className="p-4 bg-muted">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label className="text-sm font-semibold flex items-center gap-2">
-                        {isAnalyzing ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Gerando Prompt em Tempo Real...
-                          </>
+                    {isAnalyzing ? (
+                      // Modo streaming - mostra o raw
+                      <>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Label className="text-sm font-semibold">
+                            Gerando Análise Estruturada em Tempo Real...
+                          </Label>
+                        </div>
+                        
+                        <Textarea
+                          value={analyzedPrompt}
+                          placeholder="A análise aparecerá aqui em tempo real..."
+                          className="min-h-[200px] font-mono text-xs"
+                          disabled
+                        />
+                        
+                        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
+                          <span>⏳ Aguarde enquanto a IA analisa sua imagem...</span>
+                          <span className="text-primary font-mono">{analyzedPrompt.length} caracteres</span>
+                        </div>
+                      </>
+                    ) : (
+                      // Modo completo - mostra os prompts estruturados em abas
+                      <>
+                        <div className="flex items-center justify-between mb-4">
+                          <Label className="text-sm font-semibold">✅ Análise Concluída</Label>
+                        </div>
+
+                        {(promptWithText || promptWithoutText) ? (
+                          // Se temos prompts estruturados
+                          <Tabs defaultValue="with-text" className="w-full">
+                            <TabsList className="grid w-full grid-cols-2">
+                              <TabsTrigger value="with-text">📝 Com Texto</TabsTrigger>
+                              <TabsTrigger value="without-text">🚫 Sem Texto</TabsTrigger>
+                            </TabsList>
+                            
+                            <TabsContent value="with-text" className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <Label className="text-sm text-muted-foreground">
+                                  Prompt com descrição de texto
+                                </Label>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(promptWithText);
+                                    toast({ title: '📋 Prompt (com texto) copiado!' });
+                                  }}
+                                >
+                                  <Copy className="h-3 w-3 mr-1" />
+                                  Copiar
+                                </Button>
+                              </div>
+                              <Textarea
+                                value={promptWithText}
+                                onChange={(e) => setPromptWithText(e.target.value)}
+                                className="min-h-[200px] font-mono text-sm"
+                              />
+                            </TabsContent>
+                            
+                            <TabsContent value="without-text" className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <Label className="text-sm text-muted-foreground">
+                                  Prompt sem texto (apenas visual)
+                                </Label>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(promptWithoutText);
+                                    toast({ title: '📋 Prompt (sem texto) copiado!' });
+                                  }}
+                                >
+                                  <Copy className="h-3 w-3 mr-1" />
+                                  Copiar
+                                </Button>
+                              </div>
+                              <Textarea
+                                value={promptWithoutText}
+                                onChange={(e) => setPromptWithoutText(e.target.value)}
+                                className="min-h-[200px] font-mono text-sm"
+                              />
+                            </TabsContent>
+                          </Tabs>
                         ) : (
-                          <>✅ Prompt Gerado</>
+                          // Fallback: se não temos estrutura, mostra o raw
+                          <>
+                            <div className="flex justify-between items-center mb-2">
+                              <Label className="text-sm text-muted-foreground">
+                                Prompt gerado (formato não estruturado)
+                              </Label>
+                              <Button 
+                                size="sm" 
+                                variant="outline"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(analyzedPrompt);
+                                  toast({ title: '📋 Prompt copiado!' });
+                                }}
+                              >
+                                <Copy className="h-3 w-3 mr-1" />
+                                Copiar
+                              </Button>
+                            </div>
+                            <Textarea
+                              value={analyzedPrompt}
+                              onChange={(e) => setAnalyzedPrompt(e.target.value)}
+                              className="min-h-[200px] font-mono text-sm"
+                            />
+                          </>
                         )}
-                      </Label>
-                      {analysisComplete && (
-                        <div className="flex gap-2">
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={copyPromptToClipboard}
-                          >
-                            <Copy className="h-3 w-3 mr-1" />
-                            Copiar
-                          </Button>
+
+                        {/* Metadata se disponível */}
+                        {promptMetadata && (
+                          <Card className="p-3 mt-4 bg-background">
+                            <Label className="text-xs font-semibold mb-2 block">📊 Metadados da Análise</Label>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              {promptMetadata.tema && (
+                                <div><span className="font-medium">Tema:</span> {promptMetadata.tema}</div>
+                              )}
+                              {promptMetadata.estilo && (
+                                <div><span className="font-medium">Estilo:</span> {promptMetadata.estilo}</div>
+                              )}
+                              {promptMetadata.emocao && (
+                                <div><span className="font-medium">Emoção:</span> {promptMetadata.emocao}</div>
+                              )}
+                              {promptMetadata.plano && (
+                                <div><span className="font-medium">Plano:</span> {promptMetadata.plano}</div>
+                              )}
+                              {promptMetadata.quantidade_pessoas !== undefined && (
+                                <div><span className="font-medium">Pessoas:</span> {promptMetadata.quantidade_pessoas}</div>
+                              )}
+                              {promptMetadata.ambiente && (
+                                <div><span className="font-medium">Ambiente:</span> {promptMetadata.ambiente}</div>
+                              )}
+                              {promptMetadata.paleta_cores && promptMetadata.paleta_cores.length > 0 && (
+                                <div className="col-span-2">
+                                  <span className="font-medium">Paleta:</span> {promptMetadata.paleta_cores.join(', ')}
+                                </div>
+                              )}
+                            </div>
+                          </Card>
+                        )}
+
+                        <div className="mt-3 flex gap-2">
                           <Button 
                             size="sm" 
                             variant="outline"
                             onClick={() => {
                               setAnalyzedPrompt('');
+                              setPromptWithText('');
+                              setPromptWithoutText('');
+                              setPromptMetadata(null);
                               setAnalysisComplete(false);
                             }}
+                            className="flex-1"
                           >
-                            Limpar
+                            <Trash2 className="h-3 w-3 mr-1" />
+                            Limpar Tudo
                           </Button>
                         </div>
-                      )}
-                    </div>
-                    
-                    <Textarea
-                      value={analyzedPrompt}
-                      onChange={(e) => setAnalyzedPrompt(e.target.value)}
-                      placeholder="O prompt aparecerá aqui em tempo real..."
-                      className="min-h-[200px] font-mono text-sm"
-                      disabled={isAnalyzing}
-                    />
-                    
-                    {isAnalyzing && (
-                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground animate-pulse">
-                        <span>⏳ Aguarde enquanto a IA analisa sua imagem...</span>
-                        <span className="text-primary font-mono">{analyzedPrompt.length} caracteres</span>
-                      </div>
-                    )}
-                    
-                    {analysisComplete && (
-                      <div className="mt-2 text-xs text-muted-foreground">
-                        💡 Você pode editar o prompt antes de gerar as imagens
-                      </div>
+
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          💡 Você pode editar os prompts antes de gerar as imagens
+                        </div>
+                      </>
                     )}
                   </Card>
                 )}
 
                 {/* Botão MODELAR */}
-                {analysisComplete && analyzedPrompt && (
+                {analysisComplete && (promptWithText || promptWithoutText || analyzedPrompt) && (
                   <Button 
                     onClick={() => setShowGenerationDialog(true)}
                     className="w-full mt-4"
                     size="lg"
                   >
-                    🎨 MODELAR
+                    🎨 MODELAR (Gerar Imagens)
                   </Button>
                 )}
               </Card>
