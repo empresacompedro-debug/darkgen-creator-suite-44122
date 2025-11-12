@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { getNextKeyRoundRobin, markKeyExhaustedAndGetNext } from '../_shared/round-robin.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -144,6 +145,24 @@ serve(async (req) => {
 
 // ==================== FUNÇÕES AUXILIARES ====================
 
+async function getYouTubeKeyWithRotation(userId: string, supabaseClient: any, currentKeyId?: string): Promise<{ key: string; keyId: string } | null> {
+  const keyData = await getNextKeyRoundRobin(userId, 'youtube', supabaseClient);
+  
+  if (!keyData) {
+    // Fallback para env var se não tiver chaves do usuário
+    const globalKey = Deno.env.get('YOUTUBE_API_KEY');
+    if (globalKey) {
+      console.warn('⚠️ Usando chave global .env (usuário sem chaves configuradas)');
+      return { key: globalKey, keyId: 'global' };
+    }
+    console.error('❌ Nenhuma YouTube API Key disponível');
+    return null;
+  }
+  
+  console.log(`✅ [Round-Robin] Usando chave ${keyData.keyNumber}/${keyData.totalKeys} (priority: ${keyData.keyNumber})`);
+  return { key: keyData.key, keyId: keyData.keyId };
+}
+
 async function performInitialSearch(config: any) {
   const { searchId, searchTerm, minDuration, darkDetectionMethod, userId, supabaseClient } = config;
   
@@ -151,19 +170,22 @@ async function performInitialSearch(config: any) {
   let videosFound = 0;
   let facelessFound = 0;
   
-  const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
-  if (!YOUTUBE_API_KEY) {
-    throw new Error('YouTube API key não configurada');
+  // 🔑 Buscar chave com Round-Robin
+  const keyResult = await getYouTubeKeyWithRotation(userId, supabaseClient);
+  if (!keyResult) {
+    throw new Error('Nenhuma YouTube API key disponível');
   }
+  
+  let currentKey = keyResult.key;
+  let currentKeyId = keyResult.keyId;
 
   console.log(`🔍 ITERAÇÃO 0: Busca inicial para "${searchTerm}"`);
+  console.log(`🔑 [YouTube API] Usando chave: ${currentKey.substring(0, 15)}...`);
 
   const MAX_PAGES = 10;
   let allVideos = [];
   let nextPageToken = '';
   let pagesSearched = 0;
-
-  const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(searchTerm)}&type=video&maxResults=50&order=viewCount&key=${YOUTUBE_API_KEY}`;
 
   while (pagesSearched < MAX_PAGES) {
     // Verificar se a busca foi parada
@@ -178,13 +200,44 @@ async function performInitialSearch(config: any) {
       break;
     }
 
+    const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(searchTerm)}&type=video&maxResults=50&order=viewCount&key=${currentKey}`;
     const url = nextPageToken ? `${searchUrl}&pageToken=${nextPageToken}` : searchUrl;
     
     const response = await fetch(url);
     quotaUsed += 100;
     
     if (!response.ok) {
-      console.warn(`⚠️ Erro na busca: ${response.status}`);
+      const errorBody = await response.text();
+      console.error(`❌ Erro ${response.status} na YouTube API:`, errorBody);
+      
+      // Se for 403 (quota), tentar rotacionar para próxima chave
+      if (response.status === 403 && currentKeyId !== 'global') {
+        console.log('🔄 Quota esgotada, rotacionando chave...');
+        
+        const nextKey = await markKeyExhaustedAndGetNext(
+          userId,
+          currentKeyId,
+          'youtube',
+          supabaseClient
+        );
+        
+        if (nextKey) {
+          console.log(`✅ Rotacionado para chave ${nextKey.keyNumber}/${nextKey.totalKeys}`);
+          currentKey = nextKey.key;
+          currentKeyId = nextKey.keyId;
+          continue; // Tentar novamente com nova chave
+        } else {
+          console.error('❌ Todas as chaves YouTube esgotadas!');
+          await supabaseClient
+            .from('related_searches')
+            .update({ 
+              status: 'quota_exhausted',
+              error_message: 'Todas as chaves YouTube esgotaram a quota' 
+            })
+            .eq('id', searchId);
+        }
+      }
+      
       break;
     }
     
@@ -224,7 +277,7 @@ async function performInitialSearch(config: any) {
     console.log(`📊 Processando lote ${batchNumber} (${batch.length} vídeos)...`);
     
     const videoIds = batch.map((v: any) => v.id.videoId).join(',');
-    const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoIds}&key=${YOUTUBE_API_KEY}`;
+    const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoIds}&key=${currentKey}`;
     
     const detailsResponse = await fetch(detailsUrl);
     quotaUsed += 1;
@@ -241,7 +294,7 @@ async function performInitialSearch(config: any) {
         continue;
       }
       
-      const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${video.snippet.channelId}&key=${YOUTUBE_API_KEY}`;
+      const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${video.snippet.channelId}&key=${currentKey}`;
       const channelResponse = await fetch(channelUrl);
       quotaUsed += 1;
       
@@ -259,6 +312,7 @@ async function performInitialSearch(config: any) {
         channel,
         method: darkDetectionMethod,
         supabaseClient,
+        youtubeApiKey: currentKey,
       });
       
       if (!isFaceless.isFaceless) {
@@ -379,8 +433,15 @@ async function performIteration(config: any) {
   let videosFound = 0;
   let facelessFound = 0;
   
-  const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
-  if (!YOUTUBE_API_KEY) throw new Error('YouTube API key não configurada');
+  // 🔑 Buscar chave com Round-Robin
+  const keyResult = await getYouTubeKeyWithRotation(userId, supabaseClient);
+  if (!keyResult) {
+    throw new Error('Nenhuma YouTube API key disponível');
+  }
+  
+  let currentKey = keyResult.key;
+  let currentKeyId = keyResult.keyId;
+  console.log(`🔑 [YouTube API] Usando chave: ${currentKey.substring(0, 15)}...`);
   
   for (const prevVideo of previousVideos) {
     // Verificar se a busca foi parada
@@ -396,20 +457,41 @@ async function performIteration(config: any) {
     }
     console.log(`🔗 Buscando relacionados de: ${prevVideo.youtube_video_id}`);
     
-    const relatedUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&relatedToVideoId=${prevVideo.youtube_video_id}&type=video&maxResults=20&key=${YOUTUBE_API_KEY}`;
+    const relatedUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&relatedToVideoId=${prevVideo.youtube_video_id}&type=video&maxResults=20&key=${currentKey}`;
     
     const relatedResponse = await fetch(relatedUrl);
     quotaUsed += 100;
     
     if (!relatedResponse.ok) {
-      console.warn(`⚠️ Erro ao buscar relacionados: ${relatedResponse.status}`);
-      if (relatedResponse.status === 403) {
-        await supabaseClient
-          .from('related_searches')
-          .update({ status: 'quota_exhausted' })
-          .eq('id', searchId);
+      console.error(`❌ Erro ${relatedResponse.status} ao buscar relacionados`);
+      
+      // Se for 403 (quota), tentar rotacionar para próxima chave
+      if (relatedResponse.status === 403 && currentKeyId !== 'global') {
+        console.log('🔄 Quota esgotada, rotacionando chave...');
         
-        throw new Error('YOUTUBE_QUOTA_EXCEEDED');
+        const nextKey = await markKeyExhaustedAndGetNext(
+          userId,
+          currentKeyId,
+          'youtube',
+          supabaseClient
+        );
+        
+        if (nextKey) {
+          console.log(`✅ Rotacionado para chave ${nextKey.keyNumber}/${nextKey.totalKeys}`);
+          currentKey = nextKey.key;
+          currentKeyId = nextKey.keyId;
+          continue; // Tentar novamente com nova chave
+        } else {
+          console.error('❌ Todas as chaves YouTube esgotadas!');
+          await supabaseClient
+            .from('related_searches')
+            .update({ 
+              status: 'quota_exhausted',
+              error_message: 'Todas as chaves YouTube esgotaram a quota'
+            })
+            .eq('id', searchId);
+          break;
+        }
       }
       continue;
     }
@@ -432,7 +514,7 @@ async function performIteration(config: any) {
         continue;
       }
       
-      const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${relatedVideo.id.videoId}&key=${YOUTUBE_API_KEY}`;
+      const detailsUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${relatedVideo.id.videoId}&key=${currentKey}`;
       const detailsResponse = await fetch(detailsUrl);
       quotaUsed += 1;
       
@@ -447,7 +529,7 @@ async function performIteration(config: any) {
       const duration = parseDuration(video.contentDetails.duration);
       if (duration < searchRecord.min_duration) continue;
       
-      const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${video.snippet.channelId}&key=${YOUTUBE_API_KEY}`;
+      const channelUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${video.snippet.channelId}&key=${currentKey}`;
       const channelResponse = await fetch(channelUrl);
       quotaUsed += 1;
       
@@ -462,6 +544,7 @@ async function performIteration(config: any) {
         channel,
         method: searchRecord.dark_detection_method,
         supabaseClient,
+        youtubeApiKey: currentKey,
       });
       
       if (!isFaceless.isFaceless) continue;
@@ -580,13 +663,13 @@ async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean
   
   // ⚡ MÉTODO LOVABLE AI (texto apenas)
   if (method === 'lovable-ai') {
-    const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
+    const youtubeKey = config.youtubeApiKey;
     
     // 🔥 BUSCAR TÍTULOS RECENTES DO CANAL
     let recentTitles: string[] = [];
-    if (YOUTUBE_API_KEY) {
+    if (youtubeKey) {
       try {
-        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${YOUTUBE_API_KEY}`;
+        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${youtubeKey}`;
         const videosResponse = await fetch(videosUrl);
         
         if (videosResponse.ok) {
