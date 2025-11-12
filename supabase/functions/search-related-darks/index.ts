@@ -231,8 +231,7 @@ async function performInitialSearch(config: any) {
           await supabaseClient
             .from('related_searches')
             .update({ 
-              status: 'quota_exhausted',
-              error_message: 'Todas as chaves YouTube esgotaram a quota' 
+              status: 'quota_exhausted'
             })
             .eq('id', searchId);
         }
@@ -486,8 +485,7 @@ async function performIteration(config: any) {
           await supabaseClient
             .from('related_searches')
             .update({ 
-              status: 'quota_exhausted',
-              error_message: 'Todas as chaves YouTube esgotaram a quota'
+              status: 'quota_exhausted'
             })
             .eq('id', searchId);
           break;
