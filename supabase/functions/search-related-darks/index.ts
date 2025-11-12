@@ -537,6 +537,48 @@ async function performIteration(config: any) {
 async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean; score: number; analysis: any }> {
   const { video, channel, method, supabaseClient } = config;
   
+  // 🤖 MÉTODO GPT-4o VISION - Análise de thumbnail
+  if (method === 'gpt-4o-vision') {
+    // Buscar thumbnail do vídeo
+    const thumbnailUrl = video.snippet.thumbnails?.maxresdefault?.url || 
+                        video.snippet.thumbnails?.high?.url ||
+                        video.snippet.thumbnails?.medium?.url;
+    
+    if (!thumbnailUrl) {
+      console.warn('⚠️ Thumbnail não disponível, usando fallback');
+      return keywordFallback(channel, [video.snippet.title]);
+    }
+
+    console.log(`[GPT-4o] Analisando: ${channel.snippet.title}`);
+
+    // Chamar GPT-4o Vision
+    const { data, error } = await supabaseClient.functions.invoke('analyze-dark-gpt4o-vision', {
+      body: {
+        thumbnailUrl,
+        videoTitle: video.snippet.title,
+        channelName: channel.snippet.title,
+        videoDescription: channel.snippet.description,
+        videoId: video.id,
+        channelId: channel.id,
+      },
+    });
+    
+    if (error || !data) {
+      console.error('❌ Erro no GPT-4o Vision, usando fallback:', error);
+      return keywordFallback(channel, [video.snippet.title]);
+    }
+    
+    console.log(`[GPT-4o] ${data.isDark ? '✅ FACELESS' : '❌ NÃO-FACELESS'} - ${data.reason}`);
+    console.log(`[GPT-4o] Método: ${data.method}, Confiança: ${data.confidence}%`);
+    
+    return {
+      isFaceless: data.isDark,
+      score: data.confidence,
+      analysis: data,
+    };
+  }
+  
+  // ⚡ MÉTODO LOVABLE AI (texto apenas)
   if (method === 'lovable-ai') {
     const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
     
@@ -556,8 +598,7 @@ async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean
       }
     }
     
-    console.log(`[DETECT] Canal: ${channel.snippet.title}`);
-    console.log(`[DETECT] Títulos: ${recentTitles.join(' | ') || 'N/A'}`);
+    console.log(`[LOVABLE-AI] Canal: ${channel.snippet.title}`);
     
     const { data, error } = await supabaseClient.functions.invoke('detect-dark-channel', {
       body: {
@@ -572,7 +613,7 @@ async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean
     
     // Se IA falhar, usar fallback por keywords
     if (error || !data || data.error) {
-      console.warn(`[DETECT] IA falhou, usando fallback. Erro: ${error?.message || data?.error}`);
+      console.warn(`[LOVABLE-AI] IA falhou, usando fallback. Erro: ${error?.message || data?.error}`);
       return keywordFallback(channel, recentTitles);
     }
     
@@ -582,13 +623,18 @@ async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean
       analysis: data,
     };
     
-    console.log(`[DETECT] Resultado: ${result.isFaceless ? 'FACELESS ✅' : 'NÃO-FACELESS ❌'} (${result.score}%)`);
-    console.log(`[DETECT] Análise: ${JSON.stringify(result.analysis)}`);
+    console.log(`[LOVABLE-AI] Resultado: ${result.isFaceless ? 'FACELESS ✅' : 'NÃO-FACELESS ❌'} (${result.score}%)`);
     
     return result;
   }
   
-  return { isFaceless: false, score: 0, analysis: { method, error: 'Not implemented' } };
+  // 📝 MÉTODO KEYWORDS ONLY
+  if (method === 'keywords-only') {
+    console.log(`[KEYWORDS] Analisando: ${channel.snippet.title}`);
+    return keywordFallback(channel, [video.snippet.title]);
+  }
+  
+  return { isFaceless: false, score: 0, analysis: { method, error: 'Method not implemented' } };
 }
 
 function keywordFallback(channel: any, recentTitles: string[]): { isFaceless: boolean; score: number; analysis: any } {

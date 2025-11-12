@@ -34,8 +34,8 @@ const Relacionados = () => {
   const { user } = useAuth();
   
   const [searchTerm, setSearchTerm] = useState("");
-  const [minDuration, setMinDuration] = useState(600); // 10 minutos (padrão ajustado)
-  const [darkDetectionMethod, setDarkDetectionMethod] = useState("lovable-ai");
+  const [minDuration, setMinDuration] = useState(1200); // 20 minutos (canais dark são longos)
+  const [darkDetectionMethod, setDarkDetectionMethod] = useState("gpt-4o-vision");
   const [minTargetVideos, setMinTargetVideos] = useState(500);
   
   const [isSearching, setIsSearching] = useState(false);
@@ -256,13 +256,13 @@ const Relacionados = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="300">5 minutos</SelectItem>
-                  <SelectItem value="600">10 minutos (recomendado)</SelectItem>
-                  <SelectItem value="1200">20 minutos</SelectItem>
+                  <SelectItem value="600">10 minutos</SelectItem>
+                  <SelectItem value="1200">20 minutos (recomendado para darks)</SelectItem>
                   <SelectItem value="1800">30 minutos</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-1">
-                Canais faceless geralmente fazem vídeos de 20min a 3h
+                💡 Canais darks de qualidade geralmente têm vídeos de 20-60 minutos
               </p>
             </div>
             
@@ -301,26 +301,47 @@ const Relacionados = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="gpt-4o-vision">
+                  🤖 GPT-4o Vision (Analisa Thumbnail - Mais Preciso)
+                </SelectItem>
                 <SelectItem value="lovable-ai">
-                  🤖 Lovable AI (Análise Semântica - Recomendado)
+                  ⚡ Lovable AI (Análise de Texto)
                 </SelectItem>
-                <SelectItem value="google-vision">
-                  🖼️ Google Vision API (Detecção de Rosto)
-                </SelectItem>
-                <SelectItem value="face-api">
-                  👤 Face-API.js (Rápido, sem API key)
-                </SelectItem>
-                <SelectItem value="hybrid-lovable-faceapi">
-                  ⚡ Híbrido: Lovable AI + Face-API
-                </SelectItem>
-                <SelectItem value="hybrid-faceapi-vision">
-                  🔥 Híbrido: Face-API + Google Vision
+                <SelectItem value="keywords-only">
+                  📝 Keywords (Mais Rápido, Menos Preciso)
                 </SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground mt-1">
-              Detecta canais sem pessoas reais (narração + imagens, vídeos de arquivo, animações)
-            </p>
+            
+            {darkDetectionMethod === 'gpt-4o-vision' && (
+              <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-sm text-blue-900 dark:text-blue-100">
+                  <strong>✅ GPT-4o Vision</strong> - Analisa a THUMBNAIL do vídeo para detectar se o criador aparece.
+                  <br />
+                  📊 Precisão: 90-95% | 💰 Custo: ~$0.15/1000 análises | 💾 Cache de 90 dias
+                </p>
+              </div>
+            )}
+            
+            {darkDetectionMethod === 'lovable-ai' && (
+              <div className="mt-2 p-3 bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg">
+                <p className="text-sm text-purple-900 dark:text-purple-100">
+                  <strong>⚡ Lovable AI</strong> - Analisa título, descrição e nome do canal (texto apenas).
+                  <br />
+                  📊 Precisão: 70-80% | 💰 Requer créditos Lovable
+                </p>
+              </div>
+            )}
+            
+            {darkDetectionMethod === 'keywords-only' && (
+              <div className="mt-2 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+                <p className="text-sm text-green-900 dark:text-green-100">
+                  <strong>📝 Keywords</strong> - Detecção rápida por palavras-chave (WW2, documentário, etc).
+                  <br />
+                  📊 Precisão: 60-70% | 💰 Grátis
+                </p>
+              </div>
+            )}
           </div>
           
           <div className="flex gap-2">

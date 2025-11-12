@@ -281,6 +281,60 @@ export type Database = {
         }
         Relationships: []
       }
+      dark_analysis_cache: {
+        Row: {
+          analysis_method: string
+          analyzed_at: string | null
+          channel_id: string | null
+          confidence: number
+          content_type: string | null
+          created_at: string | null
+          expires_at: string | null
+          face_size: string | null
+          has_face: boolean
+          id: string
+          indicators: Json | null
+          is_dark: boolean
+          reason: string
+          thumbnail_url: string
+          video_id: string | null
+        }
+        Insert: {
+          analysis_method: string
+          analyzed_at?: string | null
+          channel_id?: string | null
+          confidence: number
+          content_type?: string | null
+          created_at?: string | null
+          expires_at?: string | null
+          face_size?: string | null
+          has_face: boolean
+          id?: string
+          indicators?: Json | null
+          is_dark: boolean
+          reason: string
+          thumbnail_url: string
+          video_id?: string | null
+        }
+        Update: {
+          analysis_method?: string
+          analyzed_at?: string | null
+          channel_id?: string | null
+          confidence?: number
+          content_type?: string | null
+          created_at?: string | null
+          expires_at?: string | null
+          face_size?: string | null
+          has_face?: boolean
+          id?: string
+          indicators?: Json | null
+          is_dark?: boolean
+          reason?: string
+          thumbnail_url?: string
+          video_id?: string | null
+        }
+        Relationships: []
+      }
       description_optimizations: {
         Row: {
           ai_model: string | null
@@ -1676,6 +1730,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      cleanup_expired_dark_cache: { Args: never; Returns: undefined }
       decrypt_api_key: {
         Args: { p_encrypted: string; p_user_id: string }
         Returns: string
