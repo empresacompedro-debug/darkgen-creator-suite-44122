@@ -34,7 +34,7 @@ const Relacionados = () => {
   const { user } = useAuth();
   
   const [searchTerm, setSearchTerm] = useState("");
-  const [minDuration, setMinDuration] = useState(1200);
+  const [minDuration, setMinDuration] = useState(600); // 10 minutos (padrão ajustado)
   const [darkDetectionMethod, setDarkDetectionMethod] = useState("lovable-ai");
   const [minTargetVideos, setMinTargetVideos] = useState(500);
   
@@ -255,8 +255,9 @@ const Relacionados = () => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="600">10 minutos</SelectItem>
-                  <SelectItem value="1200">20 minutos (recomendado)</SelectItem>
+                  <SelectItem value="300">5 minutos</SelectItem>
+                  <SelectItem value="600">10 minutos (recomendado)</SelectItem>
+                  <SelectItem value="1200">20 minutos</SelectItem>
                   <SelectItem value="1800">30 minutos</SelectItem>
                 </SelectContent>
               </Select>
@@ -385,20 +386,39 @@ const Relacionados = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div>
-                <div className="text-2xl font-bold">{totalVideosAnalyzed}</div>
-                <div className="text-xs text-muted-foreground">Analisados</div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="text-center p-3 bg-background rounded-lg border">
+                <div className="text-2xl font-bold text-primary">{totalVideosAnalyzed}</div>
+                <div className="text-xs text-muted-foreground">Vídeos Analisados</div>
               </div>
-              <div>
+              <div className="text-center p-3 bg-background rounded-lg border">
                 <div className="text-2xl font-bold text-green-600">{totalFacelessFound}</div>
-                <div className="text-xs text-muted-foreground">Faceless</div>
+                <div className="text-xs text-muted-foreground">Canais Faceless ✅</div>
               </div>
-              <div>
-                <div className="text-2xl font-bold">{quotaUsed.toLocaleString()}</div>
-                <div className="text-xs text-muted-foreground">Quota</div>
+              <div className="text-center p-3 bg-background rounded-lg border">
+                <div className="text-2xl font-bold text-red-600">{totalVideosAnalyzed - totalFacelessFound}</div>
+                <div className="text-xs text-muted-foreground">Rejeitados ❌</div>
+              </div>
+              <div className="text-center p-3 bg-background rounded-lg border">
+                <div className="text-2xl font-bold text-purple-600">
+                  {totalVideosAnalyzed > 0 ? Math.round((totalFacelessFound / totalVideosAnalyzed) * 100) : 0}%
+                </div>
+                <div className="text-xs text-muted-foreground">Taxa de Aceitação</div>
               </div>
             </div>
+            
+            <div className="text-xs text-center text-muted-foreground">
+              Quota Usada: <span className="font-bold">{quotaUsed.toLocaleString()}</span> unidades
+            </div>
+            
+            {totalVideosAnalyzed > 50 && totalFacelessFound > 0 && (totalFacelessFound / totalVideosAnalyzed) < 0.05 && (
+              <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-800 rounded-lg p-3">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  ⚠️ <strong>Taxa de aceitação baixa ({Math.round((totalFacelessFound / totalVideosAnalyzed) * 100)}%)!</strong><br/>
+                  Tente: Reduzir duração mínima para 5min ou buscar termo mais específico como "WW2 documentary" ou "True Crime narrated"
+                </p>
+              </div>
+            )}
             
             <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
               <p className="text-sm text-blue-800 dark:text-blue-200">

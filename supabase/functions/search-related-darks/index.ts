@@ -538,28 +538,173 @@ async function detectFacelessChannel(config: any): Promise<{ isFaceless: boolean
   const { video, channel, method, supabaseClient } = config;
   
   if (method === 'lovable-ai') {
+    const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
+    
+    // 🔥 BUSCAR TÍTULOS RECENTES DO CANAL
+    let recentTitles: string[] = [];
+    if (YOUTUBE_API_KEY) {
+      try {
+        const videosUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channel.id}&type=video&order=date&maxResults=5&key=${YOUTUBE_API_KEY}`;
+        const videosResponse = await fetch(videosUrl);
+        
+        if (videosResponse.ok) {
+          const videosData = await videosResponse.json();
+          recentTitles = videosData.items?.map((v: any) => v.snippet.title) || [];
+        }
+      } catch (error) {
+        console.warn('Erro ao buscar títulos recentes:', error);
+      }
+    }
+    
+    console.log(`[DETECT] Canal: ${channel.snippet.title}`);
+    console.log(`[DETECT] Títulos: ${recentTitles.join(' | ') || 'N/A'}`);
+    
     const { data, error } = await supabaseClient.functions.invoke('detect-dark-channel', {
       body: {
         channelData: {
           name: channel.snippet.title,
           description: channel.snippet.description || '',
+          recentTitles: recentTitles,
           contentType: 'video',
         },
       },
     });
     
-    if (error || !data) {
-      return { isFaceless: false, score: 0, analysis: null };
+    // Se IA falhar, usar fallback por keywords
+    if (error || !data || data.error) {
+      console.warn(`[DETECT] IA falhou, usando fallback. Erro: ${error?.message || data?.error}`);
+      return keywordFallback(channel, recentTitles);
     }
     
-    return {
+    const result = {
       isFaceless: data.isDarkChannel,
       score: data.confidence,
       analysis: data,
     };
+    
+    console.log(`[DETECT] Resultado: ${result.isFaceless ? 'FACELESS ✅' : 'NÃO-FACELESS ❌'} (${result.score}%)`);
+    console.log(`[DETECT] Análise: ${JSON.stringify(result.analysis)}`);
+    
+    return result;
   }
   
   return { isFaceless: false, score: 0, analysis: { method, error: 'Not implemented' } };
+}
+
+function keywordFallback(channel: any, recentTitles: string[]): { isFaceless: boolean; score: number; analysis: any } {
+  const text = `${channel.snippet.title} ${channel.snippet.description} ${recentTitles.join(' ')}`.toLowerCase();
+  
+  // Keywords de nichos FACELESS (baseado nos 500+ nichos)
+  const facelessKeywords = [
+    // HISTÓRIA
+    'ww2', 'world war', 'wwii', 'history', 'ancient', 'medieval', 'historical', 'documentary',
+    'roman empire', 'viking', 'samurai', 'pirate', 'civilization', 'archaeology', 'battlefield',
+    
+    // TRUE CRIME
+    'true crime', 'mystery', 'unsolved', 'detective', 'investigation', 'murder', 'serial killer',
+    'cold case', 'forensic', 'fbi', 'disappearance', 'heist', 'cult', 'interrogation',
+    
+    // HORROR/STORIES
+    'horror', 'scary', 'creepy', 'stories', 'tales', 'narration', 'storytelling',
+    'creepypasta', 'haunted', 'ghost', 'paranormal', 'urban legend', 'nightmare',
+    
+    // GAMING
+    'gameplay', 'walkthrough', 'playthrough', 'let\'s play', 'gaming', 'speedrun',
+    'game lore', 'easter egg', 'theory', 'boss fight', 'strategy',
+    
+    // CIÊNCIA/EDUCAÇÃO
+    'science', 'space', 'astronomy', 'physics', 'education', 'explained',
+    'black hole', 'universe', 'quantum', 'evolution', 'biology', 'chemistry',
+    
+    // NATUREZA
+    'nature', 'wildlife', 'animals', 'ocean', 'planet', 'earth', 'ecosystem',
+    
+    // ANIMAÇÃO/MOTION
+    'animation', 'animated', 'motion graphics', 'infographic', 'whiteboard',
+    
+    // FINANÇAS
+    'stock market', 'crypto', 'bitcoin', 'investment', 'trading', 'finance',
+    'business', 'economy', 'venture capital', 'startup', 'entrepreneur', 'dividend',
+    
+    // PSICOLOGIA
+    'psychology', 'cognitive', 'behavior', 'mental', 'narcissism', 'dark psychology',
+    'body language', 'influence', 'manipulation', 'stoicism',
+    
+    // GEOPOLÍTICA/MILITAR
+    'military', 'warfare', 'geopolitical', 'weapon', 'defense', 'intelligence',
+    'cia', 'secret', 'classified', 'spy', 'tactical', 'strategy',
+    
+    // MAKE MONEY ONLINE
+    'passive income', 'dropshipping', 'affiliate', 'youtube growth', 'amazon fba',
+    'online course', 'side hustle', 'make money',
+    
+    // TECNOLOGIA
+    'ai', 'artificial intelligence', 'chatgpt', 'blockchain', 'robotics',
+    'cybersecurity', 'tech', 'coding', 'programming', 'software',
+    
+    // DOCUMENTÁRIOS/EXPOSIÇÕES
+    'scandal', 'conspiracy', 'cover-up', 'experiment', 'war crime', 'slavery',
+    'trafficking', 'pharmaceutical', 'corporate', 'exposé',
+    
+    // FILOSOFIA/DESENVOLVIMENTO
+    'philosophy', 'productivity', 'habits', 'minimalism', 'discipline',
+    
+    // MITOLOGIA/LENDAS
+    'mythology', 'legend', 'folklore', 'cryptid', 'mythical', 'gods',
+    
+    // COMPILAÇÕES
+    'compilation', 'top 10', 'facts about', 'best of', 'moments', 'countdown',
+    
+    // AI/NARRAÇÃO
+    'ai voice', 'voice over', 'narrated', 'documentary style', 'narrator',
+  ];
+  
+  // Keywords de canais NÃO-FACELESS
+  const notFacelessKeywords = [
+    'vlog', 'my life', 'daily', 'interview', 'podcast', 'react', 'reaction',
+    'face reveal', 'talking', 'my channel', 'personal', 'subscribe to my',
+    'meet me', 'follow me', 'i will', 'i am', 'my story', 'facecam',
+  ];
+  
+  const matchedFaceless = facelessKeywords.filter(kw => text.includes(kw));
+  const matchedNotFaceless = notFacelessKeywords.filter(kw => text.includes(kw));
+  
+  if (matchedNotFaceless.length > 0) {
+    console.log(`[FALLBACK] NÃO-FACELESS detectado: ${matchedNotFaceless.join(', ')}`);
+    return { 
+      isFaceless: false, 
+      score: 70, 
+      analysis: { 
+        method: 'keyword-fallback', 
+        reason: 'Not faceless keywords detected',
+        keywords: matchedNotFaceless
+      } 
+    };
+  }
+  
+  if (matchedFaceless.length > 0) {
+    console.log(`[FALLBACK] FACELESS detectado: ${matchedFaceless.join(', ')}`);
+    return { 
+      isFaceless: true, 
+      score: 65, 
+      analysis: { 
+        method: 'keyword-fallback', 
+        reason: 'Faceless niche detected',
+        keywords: matchedFaceless
+      } 
+    };
+  }
+  
+  // Se não tem certeza, ACEITAR (melhor false positive que false negative)
+  console.log(`[FALLBACK] Sem indicadores fortes, aceitando por padrão`);
+  return { 
+    isFaceless: true, 
+    score: 50, 
+    analysis: { 
+      method: 'keyword-fallback', 
+      reason: 'No strong indicators, defaulting to accept' 
+    } 
+  };
 }
 
 function parseDuration(isoDuration: string): number {

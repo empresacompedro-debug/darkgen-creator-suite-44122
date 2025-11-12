@@ -23,48 +23,81 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    // Construir prompt aprimorado focando em canais FACELESS
-    const prompt = `Analise se este canal do YouTube é um "CANAL FACELESS" (sem pessoas reais aparecendo).
+    // Construir prompt UNIVERSAL para QUALQUER nicho faceless
+    const prompt = `Você é um especialista em identificar CANAIS FACELESS no YouTube.
 
 DADOS DO CANAL:
 - Nome: ${channelData.name}
 - Descrição: ${channelData.description || 'Não disponível'}
-- Títulos recentes: ${channelData.recentTitles?.slice(0, 5).join(', ') || 'Não disponível'}
+- Títulos recentes: ${channelData.recentTitles?.join(' | ') || 'Não disponível'}
 
-⚠️ CRÍTICO - DEFINIÇÃO DE FACELESS:
-Um canal FACELESS é aquele onde NUNCA aparecem pessoas reais na tela. Exemplos:
+⚠️ DEFINIÇÃO UNIVERSAL DE FACELESS:
 
-✅ É FACELESS:
-1. **Narração com 1 IMAGEM o vídeo todo** (ex: foto de WW2 + voz narrando)
-2. **Banco de vídeos/fotos de arquivo** (stock footage, historical footage, clips históricos)
-3. **Animações/Motion Graphics** (texto animado, gráficos, sem pessoas)
-4. **IA Voice-over com slides/imagens** (voz robótica + apresentação de slides)
-5. **Compilações editadas SEM apresentador** (apenas clipes, sem webcam)
-6. **Screen recordings** (tutoriais de tela, sem rosto visível)
-7. **Documentários narrados** (apenas voz + imagens/vídeos de arquivo)
+Um canal é FACELESS quando o CRIADOR/APRESENTADOR MODERNO não aparece na tela.
 
-❌ NÃO É FACELESS (REJEITAR):
-- Vlogs (criador aparece na câmera)
-- Entrevistas (pessoas visíveis)
-- Gameplay com WEBCAM/FACECAM
-- Reacts (criador na tela)
+✅ É FACELESS (aceite qualquer um destes formatos):
+
+**NARRAÇÃO + IMAGENS (QUALQUER QUANTIDADE):**
+- 1 imagem estática + narração
+- Múltiplas imagens rotativas + narração
+- Dezenas de fotos em slideshow + narração
+- Mix de imagens estáticas e clipes curtos + narração
+- Infográficos animados + narração
+- Texto animado + narração
+
+**NARRAÇÃO + FOOTAGE:**
+- Stock footage (natureza, espaço, oceano) + narração
+- Footage HISTÓRICO (soldados WW2, batalhas antigas) + narração
+- Documentários APENAS com narração (SEM apresentador moderno)
+- Compilações de vídeos de arquivo + narração
+
+**NARRAÇÃO + ANIMAÇÕES:**
+- Motion graphics + narração
+- Animações 2D/3D + narração
+- Whiteboard animations + narração
+- Text-to-speech + slides
+
+**GAMING SEM FACECAM:**
+- Gameplay puro (SEM webcam do jogador)
+- Walkthroughs (SEM facecam)
+- Screen recordings (SEM webcam)
+
+**NICHOS ESPECÍFICOS (todos são FACELESS):**
+- História/WW2: narração + footage histórico (MESMO com pessoas nas imagens)
+- True Crime: narração + fotos de suspeitos (MESMO com pessoas nas fotos)
+- Finanças: narração + gráficos de ações/empresas
+- Ciência/Espaço: narração + footage de planetas/astronautas
+- Psicologia: narração + diagramas/estudos
+- Gaming: gameplay SEM facecam
+- Horror Stories: narração + imagens assustadoras
+- Documentários: APENAS narração (SEM apresentador moderno)
+- Make Money Online: narração + screen recording
+- Geopolítica: narração + mapas/análise militar
+- Negócios: narração + análise de empresas
+
+❌ NÃO É FACELESS (rejeite APENAS estes):
+- Vlogger/YouTuber aparecendo na câmera
+- Entrevistas com pessoas VISÍVEIS (falando na tela)
+- Gameplay COM facecam/webcam
+- React videos (criador reagindo na tela)
 - Podcasts com vídeo dos apresentadores
-- "Talking head" (pessoa falando para câmera)
-- Qualquer formato onde pessoas reais aparecem
+- "Talking head" (pessoa MODERNA falando para câmera)
+- Qualquer vídeo onde o CRIADOR MODERNO aparece
 
-FOCO ESPECIAL:
-- Canais de História/WW2/True Crime geralmente SÃO faceless (narração + imagens)
-- Canais de ciência/documentário geralmente SÃO faceless (voz + vídeos de arquivo)
-- Gaming SEM facecam é faceless
-- Tutoriais de software SEM webcam são faceless
+🎯 REGRA DE OURO:
+- Se o canal usa NARRAÇÃO + qualquer quantidade de imagens/vídeos → FACELESS ✅
+- Se o CRIADOR/APRESENTADOR MODERNO aparece NA TELA → NÃO-FACELESS ❌
+- Pessoas em FOTOS HISTÓRICAS ou FOOTAGE DE ARQUIVO → FACELESS ✅
 
-Baseado nos dados, responda APENAS com JSON:
+Na dúvida, considere FACELESS (melhor false positive que false negative).
+
+Responda APENAS com JSON:
 {
   "isDarkChannel": true/false,
   "confidence": 0-100,
-  "primaryType": "narration_images" | "stock_videos" | "animations" | "ai_voice" | "compilations" | "screen_recording" | "not_faceless",
-  "indicators": ["indicadores encontrados"],
-  "reasoning": "Explicação de 1-2 linhas focando em PRESENÇA ou AUSÊNCIA de pessoas reais"
+  "primaryType": "narration" | "stock_footage" | "animation" | "gaming" | "screen_recording" | "compilation" | "documentary" | "not_faceless",
+  "indicators": ["palavras-chave encontradas nos títulos/descrição"],
+  "reasoning": "Explicação de 1 linha"
 }`;
 
     console.log('Sending request to Lovable AI...');
