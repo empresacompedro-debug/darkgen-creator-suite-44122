@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.get-usage-stats]
 verify_jwt = true
+
+[functions.search-related-darks]
+verify_jwt = true

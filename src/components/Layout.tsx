@@ -26,9 +26,13 @@ const navigation = [{
     href: "/canais-similares",
     step: 2
   }, {
+    name: "🔗 Relacionados",
+    href: "/relacionados",
+    step: 3
+  }, {
     name: "👁️ Monitoramento",
     href: "/monitoramento-concorrentes",
-    step: 3
+    step: 4
   }]
 }, {
   name: "🎯 Sub-Niche Hunter",

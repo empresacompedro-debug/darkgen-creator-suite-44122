@@ -852,6 +852,152 @@ export type Database = {
         }
         Relationships: []
       }
+      related_searches: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          current_iteration: number | null
+          dark_detection_method: string | null
+          id: string
+          min_duration: number | null
+          quota_used: number | null
+          search_term: string
+          started_at: string | null
+          status: string | null
+          stopped_at: string | null
+          total_faceless_found: number | null
+          total_videos_analyzed: number | null
+          total_videos_found: number | null
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          current_iteration?: number | null
+          dark_detection_method?: string | null
+          id?: string
+          min_duration?: number | null
+          quota_used?: number | null
+          search_term: string
+          started_at?: string | null
+          status?: string | null
+          stopped_at?: string | null
+          total_faceless_found?: number | null
+          total_videos_analyzed?: number | null
+          total_videos_found?: number | null
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          current_iteration?: number | null
+          dark_detection_method?: string | null
+          id?: string
+          min_duration?: number | null
+          quota_used?: number | null
+          search_term?: string
+          started_at?: string | null
+          status?: string | null
+          stopped_at?: string | null
+          total_faceless_found?: number | null
+          total_videos_analyzed?: number | null
+          total_videos_found?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      related_videos: {
+        Row: {
+          batch_number: number | null
+          channel_age_days: number | null
+          channel_created_at: string | null
+          channel_id: string | null
+          channel_thumbnail: string | null
+          channel_title: string | null
+          created_at: string | null
+          dark_analysis: Json | null
+          dark_method: string | null
+          dark_score: number | null
+          duration_seconds: number | null
+          engagement: number | null
+          id: string
+          is_dark: boolean | null
+          iteration: number | null
+          parent_video_id: string | null
+          published_at: string | null
+          search_id: string
+          subscriber_count: number | null
+          thumbnail_url: string | null
+          title: string | null
+          view_count: number | null
+          view_sub_ratio: number | null
+          vph: number | null
+          youtube_video_id: string
+        }
+        Insert: {
+          batch_number?: number | null
+          channel_age_days?: number | null
+          channel_created_at?: string | null
+          channel_id?: string | null
+          channel_thumbnail?: string | null
+          channel_title?: string | null
+          created_at?: string | null
+          dark_analysis?: Json | null
+          dark_method?: string | null
+          dark_score?: number | null
+          duration_seconds?: number | null
+          engagement?: number | null
+          id?: string
+          is_dark?: boolean | null
+          iteration?: number | null
+          parent_video_id?: string | null
+          published_at?: string | null
+          search_id: string
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          title?: string | null
+          view_count?: number | null
+          view_sub_ratio?: number | null
+          vph?: number | null
+          youtube_video_id: string
+        }
+        Update: {
+          batch_number?: number | null
+          channel_age_days?: number | null
+          channel_created_at?: string | null
+          channel_id?: string | null
+          channel_thumbnail?: string | null
+          channel_title?: string | null
+          created_at?: string | null
+          dark_analysis?: Json | null
+          dark_method?: string | null
+          dark_score?: number | null
+          duration_seconds?: number | null
+          engagement?: number | null
+          id?: string
+          is_dark?: boolean | null
+          iteration?: number | null
+          parent_video_id?: string | null
+          published_at?: string | null
+          search_id?: string
+          subscriber_count?: number | null
+          thumbnail_url?: string | null
+          title?: string | null
+          view_count?: number | null
+          view_sub_ratio?: number | null
+          vph?: number | null
+          youtube_video_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "related_videos_search_id_fkey"
+            columns: ["search_id"]
+            isOneToOne: false
+            referencedRelation: "related_searches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scene_prompts: {
         Row: {
           ai_model: string | null

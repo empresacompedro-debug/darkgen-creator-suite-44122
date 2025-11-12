@@ -23,38 +23,48 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    // Construir prompt detalhado para análise
-    const prompt = `Analise se este canal do YouTube é um "Canal Dark" (canal sem rosto/faceless channel).
+    // Construir prompt aprimorado focando em canais FACELESS
+    const prompt = `Analise se este canal do YouTube é um "CANAL FACELESS" (sem pessoas reais aparecendo).
 
 DADOS DO CANAL:
 - Nome: ${channelData.name}
 - Descrição: ${channelData.description || 'Não disponível'}
-- Títulos recentes dos vídeos: ${channelData.recentTitles?.slice(0, 5).join(', ') || 'Não disponível'}
-- Tipo de conteúdo (se visível): ${channelData.contentType || 'Desconhecido'}
+- Títulos recentes: ${channelData.recentTitles?.slice(0, 5).join(', ') || 'Não disponível'}
 
-CRITÉRIOS PARA CANAL DARK:
-Um canal dark/faceless é identificado por:
-1. **Narração com Imagens**: Usa voz em off + imagens estáticas, slides, fotos de arquivo
-2. **Vídeos de Arquivo (Stock Videos)**: Usa apenas vídeos de stock sem aparecer pessoa
-3. **Animações/Motion Graphics**: Usa apenas animações, texto animado, gráficos
-4. **IA/Texto-para-Voz**: Usa voz gerada por IA ou robótica com imagens
-5. **Compilações**: Compilações de clipes sem apresentador visível
-6. **Tutoriais de Tela**: Screen recordings sem aparecer o criador
+⚠️ CRÍTICO - DEFINIÇÃO DE FACELESS:
+Um canal FACELESS é aquele onde NUNCA aparecem pessoas reais na tela. Exemplos:
 
-CONTRA-INDICADORES (NÃO é dark):
-- Vlogs pessoais
-- Aparições do criador
-- Entrevistas em vídeo
-- Gameplay com webcam
-- Reacts com o criador visível
+✅ É FACELESS:
+1. **Narração com 1 IMAGEM o vídeo todo** (ex: foto de WW2 + voz narrando)
+2. **Banco de vídeos/fotos de arquivo** (stock footage, historical footage, clips históricos)
+3. **Animações/Motion Graphics** (texto animado, gráficos, sem pessoas)
+4. **IA Voice-over com slides/imagens** (voz robótica + apresentação de slides)
+5. **Compilações editadas SEM apresentador** (apenas clipes, sem webcam)
+6. **Screen recordings** (tutoriais de tela, sem rosto visível)
+7. **Documentários narrados** (apenas voz + imagens/vídeos de arquivo)
 
-Baseado nos dados fornecidos, responda APENAS com um JSON neste formato exato:
+❌ NÃO É FACELESS (REJEITAR):
+- Vlogs (criador aparece na câmera)
+- Entrevistas (pessoas visíveis)
+- Gameplay com WEBCAM/FACECAM
+- Reacts (criador na tela)
+- Podcasts com vídeo dos apresentadores
+- "Talking head" (pessoa falando para câmera)
+- Qualquer formato onde pessoas reais aparecem
+
+FOCO ESPECIAL:
+- Canais de História/WW2/True Crime geralmente SÃO faceless (narração + imagens)
+- Canais de ciência/documentário geralmente SÃO faceless (voz + vídeos de arquivo)
+- Gaming SEM facecam é faceless
+- Tutoriais de software SEM webcam são faceless
+
+Baseado nos dados, responda APENAS com JSON:
 {
   "isDarkChannel": true/false,
   "confidence": 0-100,
-  "primaryType": "narration_images" | "stock_videos" | "animations" | "ai_voice" | "compilations" | "screen_recording" | "unknown" | "not_dark",
-  "indicators": ["lista", "de", "indicadores", "encontrados"],
-  "reasoning": "Explicação breve de 1-2 linhas"
+  "primaryType": "narration_images" | "stock_videos" | "animations" | "ai_voice" | "compilations" | "screen_recording" | "not_faceless",
+  "indicators": ["indicadores encontrados"],
+  "reasoning": "Explicação de 1-2 linhas focando em PRESENÇA ou AUSÊNCIA de pessoas reais"
 }`;
 
     console.log('Sending request to Lovable AI...');

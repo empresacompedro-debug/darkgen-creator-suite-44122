@@ -9,6 +9,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Dashboard from "./pages/Dashboard";
 import CanaisSimilares from "./pages/CanaisSimilares";
+import Relacionados from "./pages/Relacionados";
 import AnaliseCanais from "./pages/AnaliseCanais";
 import NicheFinder from "./pages/NicheFinder";
 import Brainstorm from "./pages/Brainstorm";
@@ -54,6 +55,11 @@ const App = () => {
                 <Route path="/canais-similares" element={
                   <ProtectedRoute>
                     <CanaisSimilares />
+                  </ProtectedRoute>
+                } />
+                <Route path="/relacionados" element={
+                  <ProtectedRoute>
+                    <Relacionados />
                   </ProtectedRoute>
                 } />
                 <Route path="/analise-canais" element={
