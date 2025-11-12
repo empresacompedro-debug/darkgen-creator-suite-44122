@@ -57,6 +57,7 @@ const Relacionados = () => {
     }
     
     const fetchVideos = async () => {
+      // Buscar vídeos PRIMEIRO para exibir em tempo real
       const { data, error } = await supabase
         .from('related_videos')
         .select('*')
@@ -68,9 +69,10 @@ const Relacionados = () => {
         setTotalFacelessFound(data.length);
       }
       
+      // Buscar status da busca
       const { data: searchData } = await supabase
         .from('related_searches')
-        .select('current_iteration, total_videos_analyzed, quota_used')
+        .select('*')
         .eq('id', searchId)
         .single();
       
@@ -78,11 +80,32 @@ const Relacionados = () => {
         setCurrentIteration(searchData.current_iteration);
         setTotalVideosAnalyzed(searchData.total_videos_analyzed);
         setQuotaUsed(searchData.quota_used);
+        
+        // Verificar se foi parado ou completado
+        if (searchData.status === 'stopped') {
+          setIsSearching(false);
+          toast({
+            title: "⛔ Busca Interrompida",
+            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
+          });
+        } else if (searchData.status === 'quota_exhausted') {
+          setIsSearching(false);
+          toast({
+            title: "🔥 Quota Esgotada",
+            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
+          });
+        } else if (searchData.status === 'completed') {
+          setIsSearching(false);
+          toast({
+            title: "✅ Busca Completa",
+            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
+          });
+        }
       }
     };
     
     fetchVideos();
-    pollingIntervalRef.current = window.setInterval(fetchVideos, 2000);
+    pollingIntervalRef.current = window.setInterval(fetchVideos, 1000); // A cada 1 segundo
     
     return () => {
       if (pollingIntervalRef.current) {
@@ -121,16 +144,14 @@ const Relacionados = () => {
       if (error) throw error;
       
       setSearchId(data.searchId);
-      setCurrentIteration(data.iteration);
-      setTotalFacelessFound(data.facelessFound);
-      setQuotaUsed(data.quotaUsed);
       
       toast({
-        title: `✅ Iteração ${data.iteration} completa`,
-        description: `${data.facelessFound} vídeos faceless encontrados`,
+        title: "🚀 Busca Iniciada",
+        description: "Aguarde enquanto buscamos vídeos faceless...",
       });
       
-      setTimeout(() => continueIteration(data.searchId), 2000);
+      // Iniciar automaticamente as iterações
+      setTimeout(() => continueIteration(data.searchId), 3000);
       
     } catch (error: any) {
       console.error('Erro ao iniciar busca:', error);
@@ -147,52 +168,26 @@ const Relacionados = () => {
     if (!isSearching) return;
     
     try {
-      const { data, error } = await supabase.functions.invoke('search-related-darks', {
+      // Chamar próxima iteração em background
+      await supabase.functions.invoke('search-related-darks', {
         body: {
           action: 'continue',
           searchId: currentSearchId,
         },
       });
       
-      if (error) {
-        if (error.message === 'YOUTUBE_QUOTA_EXCEEDED') {
-          toast({
-            title: "🔥 Quota Esgotada",
-            description: `Busca finalizada. ${totalFacelessFound} vídeos faceless encontrados.`,
-          });
-          setIsSearching(false);
-          return;
-        }
-        throw error;
-      }
-      
-      setCurrentIteration(data.iteration);
-      setTotalFacelessFound(prev => prev + data.facelessFound);
-      setQuotaUsed(prev => prev + data.quotaUsed);
-      
-      toast({
-        title: `✅ Iteração ${data.iteration} completa`,
-        description: `+${data.facelessFound} novos vídeos faceless`,
-      });
-      
-      if (data.hasMore) {
-        setTimeout(() => continueIteration(currentSearchId), 2000);
-      } else {
-        toast({
-          title: "🎉 Busca Concluída",
-          description: `${totalFacelessFound} vídeos faceless encontrados no total`,
-        });
-        setIsSearching(false);
-      }
+      // Continuar automaticamente
+      setTimeout(() => continueIteration(currentSearchId), 3000);
       
     } catch (error: any) {
       console.error('Erro ao continuar iteração:', error);
-      toast({
-        title: "Erro na iteração",
-        description: error.message,
-        variant: "destructive",
-      });
-      setIsSearching(false);
+      if (error.message === 'YOUTUBE_QUOTA_EXCEEDED') {
+        toast({
+          title: "🔥 Quota Esgotada",
+          description: `${totalFacelessFound} vídeos encontrados`,
+        });
+        setIsSearching(false);
+      }
     }
   };
   
@@ -200,6 +195,10 @@ const Relacionados = () => {
     if (!searchId) return;
     
     try {
+      // Parar IMEDIATAMENTE no frontend
+      setIsSearching(false);
+      
+      // Enviar comando de parada para backend
       await supabase.functions.invoke('search-related-darks', {
         body: {
           action: 'stop',
@@ -207,15 +206,19 @@ const Relacionados = () => {
         },
       });
       
-      setIsSearching(false);
-      
       toast({
-        title: "❌ Busca Pausada",
-        description: `${totalFacelessFound} vídeos faceless foram encontrados até o momento`,
+        title: "⛔ Busca Interrompida",
+        description: `${totalFacelessFound} vídeos faceless encontrados`,
       });
       
     } catch (error: any) {
       console.error('Erro ao parar busca:', error);
+      // Garantir que pare localmente mesmo se houver erro
+      setIsSearching(false);
+      toast({
+        title: "⛔ Busca Interrompida",
+        description: `${totalFacelessFound} vídeos encontrados`,
+      });
     }
   };
   

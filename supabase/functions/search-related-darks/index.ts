@@ -63,23 +63,21 @@ serve(async (req) => {
 
       console.log(`🚀 Nova busca iniciada: ${searchRecord.id}`);
 
-      const initialResults = await performInitialSearch({
+      // Iniciar busca em background (não aguardar)
+      performInitialSearch({
         searchId: searchRecord.id,
         searchTerm,
         minDuration: minDuration || 1200,
         darkDetectionMethod: darkDetectionMethod || 'lovable-ai',
         userId,
         supabaseClient,
-      });
+      }).catch(err => console.error('Erro na busca inicial:', err));
 
       return new Response(
         JSON.stringify({
           success: true,
           searchId: searchRecord.id,
-          iteration: 0,
-          videosFound: initialResults.videosFound,
-          facelessFound: initialResults.facelessFound,
-          quotaUsed: initialResults.quotaUsed,
+          message: 'Busca iniciada em background',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -87,20 +85,31 @@ serve(async (req) => {
 
     // AÇÃO: CONTINUAR ITERAÇÃO
     if (action === 'continue') {
-      const continuationResults = await performIteration({
+      // Verificar se a busca ainda está ativa
+      const { data: searchStatus } = await supabaseClient
+        .from('related_searches')
+        .select('status')
+        .eq('id', searchId)
+        .single();
+
+      if (searchStatus?.status !== 'searching') {
+        return new Response(
+          JSON.stringify({ success: true, message: 'Busca já foi interrompida' }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Continuar em background (não aguardar)
+      performIteration({
         searchId,
         userId,
         supabaseClient,
-      });
+      }).catch(err => console.error('Erro na iteração:', err));
 
       return new Response(
         JSON.stringify({
           success: true,
-          iteration: continuationResults.iteration,
-          videosFound: continuationResults.videosFound,
-          facelessFound: continuationResults.facelessFound,
-          quotaUsed: continuationResults.quotaUsed,
-          hasMore: continuationResults.hasMore,
+          message: 'Iteração continuando em background',
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -157,6 +166,18 @@ async function performInitialSearch(config: any) {
   const searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(searchTerm)}&type=video&maxResults=50&order=viewCount&key=${YOUTUBE_API_KEY}`;
 
   while (pagesSearched < MAX_PAGES) {
+    // Verificar se a busca foi parada
+    const { data: searchStatus } = await supabaseClient
+      .from('related_searches')
+      .select('status')
+      .eq('id', searchId)
+      .single();
+
+    if (searchStatus?.status === 'stopped') {
+      console.log('⛔ Busca interrompida pelo usuário');
+      break;
+    }
+
     const url = nextPageToken ? `${searchUrl}&pageToken=${nextPageToken}` : searchUrl;
     
     const response = await fetch(url);
@@ -185,6 +206,18 @@ async function performInitialSearch(config: any) {
   let batchNumber = 0;
   
   for (let i = 0; i < allVideos.length; i += BATCH_SIZE) {
+    // Verificar se a busca foi parada
+    const { data: searchStatus } = await supabaseClient
+      .from('related_searches')
+      .select('status')
+      .eq('id', searchId)
+      .single();
+
+    if (searchStatus?.status === 'stopped') {
+      console.log('⛔ Busca interrompida pelo usuário durante processamento');
+      break;
+    }
+
     const batch = allVideos.slice(i, i + BATCH_SIZE);
     batchNumber++;
     
@@ -236,6 +269,7 @@ async function performInitialSearch(config: any) {
       console.log(`✅ FACELESS ENCONTRADO: "${video.snippet.title}" (Score: ${isFaceless.score})`);
       facelessFound++;
       
+      // Salvar IMEDIATAMENTE no banco para aparecer na tela
       await supabaseClient
         .from('related_videos')
         .insert({
@@ -261,9 +295,18 @@ async function performInitialSearch(config: any) {
           iteration: 0,
           batch_number: batchNumber,
         });
+
+      // Atualizar contadores imediatamente
+      await supabaseClient
+        .from('related_searches')
+        .update({
+          total_faceless_found: facelessFound,
+          quota_used: quotaUsed,
+        })
+        .eq('id', searchId);
     }
     
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   await supabaseClient
@@ -293,6 +336,18 @@ async function performIteration(config: any) {
   
   if (!searchRecord) throw new Error('Busca não encontrada');
   
+  // Verificar se foi parado
+  if (searchRecord.status === 'stopped') {
+    console.log('⛔ Busca já foi interrompida');
+    return {
+      iteration: searchRecord.current_iteration,
+      videosFound: 0,
+      facelessFound: 0,
+      quotaUsed: 0,
+      hasMore: false,
+    };
+  }
+  
   const nextIteration = searchRecord.current_iteration + 1;
   console.log(`🔄 ITERAÇÃO ${nextIteration}: Buscando relacionados...`);
   
@@ -305,6 +360,10 @@ async function performIteration(config: any) {
   
   if (!previousVideos || previousVideos.length === 0) {
     console.log('⚠️ Nenhum vídeo da iteração anterior');
+    await supabaseClient
+      .from('related_searches')
+      .update({ status: 'completed' })
+      .eq('id', searchId);
     return {
       iteration: nextIteration,
       videosFound: 0,
@@ -324,6 +383,17 @@ async function performIteration(config: any) {
   if (!YOUTUBE_API_KEY) throw new Error('YouTube API key não configurada');
   
   for (const prevVideo of previousVideos) {
+    // Verificar se a busca foi parada
+    const { data: currentStatus } = await supabaseClient
+      .from('related_searches')
+      .select('status')
+      .eq('id', searchId)
+      .single();
+
+    if (currentStatus?.status === 'stopped') {
+      console.log('⛔ Busca interrompida pelo usuário durante iteração');
+      break;
+    }
     console.log(`🔗 Buscando relacionados de: ${prevVideo.youtube_video_id}`);
     
     const relatedUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&relatedToVideoId=${prevVideo.youtube_video_id}&type=video&maxResults=20&key=${YOUTUBE_API_KEY}`;
@@ -402,6 +472,7 @@ async function performIteration(config: any) {
       const channelCreatedAt = new Date(channel.snippet.publishedAt);
       const channelAgeDays = Math.floor((Date.now() - channelCreatedAt.getTime()) / (1000 * 60 * 60 * 24));
       
+      // Salvar IMEDIATAMENTE
       await supabaseClient
         .from('related_videos')
         .insert({
@@ -427,9 +498,18 @@ async function performIteration(config: any) {
           iteration: nextIteration,
           parent_video_id: prevVideo.youtube_video_id,
         });
+
+      // Atualizar contadores imediatamente
+      await supabaseClient
+        .from('related_searches')
+        .update({
+          total_faceless_found: searchRecord.total_faceless_found + facelessFound,
+          quota_used: searchRecord.quota_used + quotaUsed,
+        })
+        .eq('id', searchId);
     }
     
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300));
   }
   
   await supabaseClient
