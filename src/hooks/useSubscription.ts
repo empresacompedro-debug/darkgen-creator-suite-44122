@@ -75,12 +75,17 @@ export const useSubscription = () => {
     }
 
     isCheckingRef.current = true;
+    console.log('🔍 [useSubscription] Iniciando verificação...');
 
     try {
       const { data, error } = await supabase.functions.invoke('check-subscription-status');
 
       if (error) {
         console.error('❌ [useSubscription] Error checking subscription:', error);
+        
+        // ✅ Limpar cache em caso de erro para forçar nova tentativa
+        cachedStatus = null;
+        cacheTimestamp = 0;
         
         // ✅ Não entrar em loop infinito em caso de erro 405
         if (error.message?.includes('405')) {
@@ -95,6 +100,8 @@ export const useSubscription = () => {
         return;
       }
 
+      console.log('✅ [useSubscription] Resposta recebida:', data);
+
       const newStatus = {
         isActive: data.isActive || false,
         isPremium: data.isPremium || false,
@@ -108,9 +115,11 @@ export const useSubscription = () => {
       cacheTimestamp = Date.now();
       
       setStatus(newStatus);
-      console.log('✅ [useSubscription] Status atualizado e cacheado');
+      console.log('✅ [useSubscription] Status atualizado:', newStatus);
     } catch (error) {
       console.error('❌ [useSubscription] Error in checkSubscription:', error);
+      cachedStatus = null;
+      cacheTimestamp = 0;
       setStatus((prev) => ({ ...prev, loading: false }));
     } finally {
       isCheckingRef.current = false;

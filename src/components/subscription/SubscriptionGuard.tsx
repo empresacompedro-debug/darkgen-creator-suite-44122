@@ -1,8 +1,10 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useSubscription } from "@/hooks/useSubscription";
 import { Card } from "@/components/ui/card";
 import { UpgradeButton } from "./UpgradeButton";
 import { Lock, Crown, Sparkles } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface SubscriptionGuardProps {
   children: ReactNode;
@@ -11,11 +13,44 @@ interface SubscriptionGuardProps {
 
 export const SubscriptionGuard = ({ children, toolName }: SubscriptionGuardProps) => {
   const { isActive, isPremium, isAdmin, loading } = useSubscription();
+  const { user } = useAuth();
+  const [directAdminCheck, setDirectAdminCheck] = useState(false);
+  const [checkingDirectAdmin, setCheckingDirectAdmin] = useState(true);
+
+  // ✅ FALLBACK: Verificar diretamente no banco se é admin (caso o hook falhe)
+  useEffect(() => {
+    const checkDirectAdmin = async () => {
+      if (!user || isAdmin) {
+        setCheckingDirectAdmin(false);
+        return;
+      }
+
+      try {
+        const { data } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', user.id)
+          .eq('role', 'admin')
+          .maybeSingle();
+
+        if (data) {
+          console.log('🔐 [SubscriptionGuard] Admin detectado via verificação direta');
+          setDirectAdminCheck(true);
+        }
+      } catch (error) {
+        console.error('❌ [SubscriptionGuard] Erro ao verificar admin:', error);
+      } finally {
+        setCheckingDirectAdmin(false);
+      }
+    };
+
+    checkDirectAdmin();
+  }, [user, isAdmin]);
 
   // Admin and Premium users always have access
-  const hasAccess = isAdmin || isPremium || isActive;
+  const hasAccess = isAdmin || directAdminCheck || isPremium || isActive;
 
-  if (loading) {
+  if (loading || checkingDirectAdmin) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-accent"></div>

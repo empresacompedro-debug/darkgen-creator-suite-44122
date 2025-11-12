@@ -173,7 +173,12 @@ async function performInitialSearch(config: any) {
   // 🔑 Buscar chave com Round-Robin
   const keyResult = await getYouTubeKeyWithRotation(userId, supabaseClient);
   if (!keyResult) {
-    throw new Error('Nenhuma YouTube API key disponível');
+    console.error('❌ Nenhuma YouTube API key disponível');
+    await supabaseClient
+      .from('related_searches')
+      .update({ status: 'no_keys' })
+      .eq('id', searchId);
+    return;
   }
   
   let currentKey = keyResult.key;
@@ -435,7 +440,12 @@ async function performIteration(config: any) {
   // 🔑 Buscar chave com Round-Robin
   const keyResult = await getYouTubeKeyWithRotation(userId, supabaseClient);
   if (!keyResult) {
-    throw new Error('Nenhuma YouTube API key disponível');
+    console.error('❌ Nenhuma YouTube API key disponível');
+    await supabaseClient
+      .from('related_searches')
+      .update({ status: 'no_keys' })
+      .eq('id', searchId);
+    return;
   }
   
   let currentKey = keyResult.key;
