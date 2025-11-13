@@ -44,6 +44,7 @@ const Configuracoes = () => {
   const [claudeKeys, setClaudeKeys] = useState<ApiKey[]>([]);
   const [openaiKeys, setOpenaiKeys] = useState<ApiKey[]>([]);
   const [huggingfaceKeys, setHuggingfaceKeys] = useState<ApiKey[]>([]);
+  const [scrapingbeeKeys, setScrapingbeeKeys] = useState<ApiKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasAdminRole, setHasAdminRole] = useState(false);
   const { setupAdmin, isLoading: isSettingUpAdmin } = useSetupAdmin();
@@ -113,7 +114,8 @@ const Configuracoes = () => {
         'vertex-ai': [] as VertexApiKey[],
         claude: [] as ApiKey[],
         openai: [] as ApiKey[],
-        huggingface: [] as ApiKey[]
+        huggingface: [] as ApiKey[],
+        scrapingbee: [] as ApiKey[]
       };
 
       data?.forEach((key: any) => {
@@ -141,6 +143,7 @@ const Configuracoes = () => {
       setClaudeKeys(groupedKeys.claude);
       setOpenaiKeys(groupedKeys.openai);
       setHuggingfaceKeys(groupedKeys.huggingface);
+      setScrapingbeeKeys(groupedKeys.scrapingbee);
     } catch (error: any) {
       console.error('Error loading API keys:', error);
     }
@@ -175,7 +178,8 @@ const Configuracoes = () => {
         'vertex-ai': setVertexKeys,
         claude: setClaudeKeys,
         openai: setOpenaiKeys,
-        huggingface: setHuggingfaceKeys
+        huggingface: setHuggingfaceKeys,
+        scrapingbee: setScrapingbeeKeys
       };
       
       setters[provider as keyof typeof setters]?.(keys);
@@ -350,6 +354,7 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys([...claudeKeys, newKey]); break;
       case 'openai': setOpenaiKeys([...openaiKeys, newKey]); break;
       case 'huggingface': setHuggingfaceKeys([...huggingfaceKeys, newKey]); break;
+      case 'scrapingbee': setScrapingbeeKeys([...scrapingbeeKeys, newKey]); break;
     }
   };
 
@@ -369,6 +374,7 @@ const Configuracoes = () => {
         case 'claude': setClaudeKeys(claudeKeys.filter(k => k.id !== id)); break;
         case 'openai': setOpenaiKeys(openaiKeys.filter(k => k.id !== id)); break;
         case 'huggingface': setHuggingfaceKeys(huggingfaceKeys.filter(k => k.id !== id)); break;
+        case 'scrapingbee': setScrapingbeeKeys(scrapingbeeKeys.filter(k => k.id !== id)); break;
       }
     }
   };
@@ -383,6 +389,7 @@ const Configuracoes = () => {
       case 'claude': setClaudeKeys(updater(claudeKeys)); break;
       case 'openai': setOpenaiKeys(updater(openaiKeys)); break;
       case 'huggingface': setHuggingfaceKeys(updater(huggingfaceKeys)); break;
+      case 'scrapingbee': setScrapingbeeKeys(updater(scrapingbeeKeys)); break;
     }
   };
 
@@ -426,6 +433,12 @@ const Configuracoes = () => {
       case 'huggingface':
         if (!trimmedKey.startsWith('hf_')) {
           return { valid: false, message: 'Chave HuggingFace deve começar com "hf_"' };
+        }
+        break;
+      
+      case 'scrapingbee':
+        if (trimmedKey.length < 20) {
+          return { valid: false, message: 'Chave ScrapingBee muito curta' };
         }
         break;
       
@@ -1342,6 +1355,7 @@ const Configuracoes = () => {
       
       {renderKeySection("Claude API Keys", "claude", claudeKeys)}
       {renderKeySection("OpenAI API Keys", "openai", openaiKeys)}
+      {renderKeySection("🐝 ScrapingBee API Keys (Web Scraping)", "scrapingbee", scrapingbeeKeys)}
       
       <Card className="p-6 bg-primary/5 border-primary/20">
         <div className="space-y-4">

@@ -1,524 +1,398 @@
-import { useState, useEffect, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Search, Loader2, StopCircle, Download, ExternalLink } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Search, ExternalLink, Info, History, Trash2, Globe } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
-interface Video {
+interface SimilarChannel {
   id: string;
-  youtube_video_id: string;
-  title: string;
-  thumbnail_url: string;
-  duration_seconds: number;
-  view_count: number;
-  channel_title: string;
-  channel_thumbnail: string;
-  subscriber_count: number;
-  channel_age_days: number;
-  vph: number;
-  view_sub_ratio: number;
-  is_dark: boolean;
-  dark_score: number;
-  iteration: number;
+  name: string;
+  handle: string;
+  url: string;
+  thumbnail: string;
+  subscribers: string;
+  videos_count?: number;
+  similarity_score: number;
+  category?: string;
+  description?: string;
+}
+
+interface SearchHistory {
+  id: string;
+  target_channel_name: string;
+  target_channel_url: string;
+  target_channel_thumbnail?: string;
+  channels_found: SimilarChannel[];
+  created_at: string;
+  search_method: string;
+  quota_used: number;
 }
 
 const Relacionados = () => {
   const { toast } = useToast();
   const { user } = useAuth();
-  
-  const [searchTerm, setSearchTerm] = useState("");
-  const [minDuration, setMinDuration] = useState(1200); // 20 minutos (canais dark são longos)
-  const [darkDetectionMethod, setDarkDetectionMethod] = useState("gpt-4o-vision");
-  const [minTargetVideos, setMinTargetVideos] = useState(500);
-  
+  const [channelUrl, setChannelUrl] = useState("");
+  const [searchMethod, setSearchMethod] = useState<string>("hybrid");
   const [isSearching, setIsSearching] = useState(false);
-  const [searchId, setSearchId] = useState<string | null>(null);
-  const [currentIteration, setCurrentIteration] = useState(0);
-  const [totalFacelessFound, setTotalFacelessFound] = useState(0);
-  const [totalVideosAnalyzed, setTotalVideosAnalyzed] = useState(0);
-  const [quotaUsed, setQuotaUsed] = useState(0);
-  
-  const [videos, setVideos] = useState<Video[]>([]);
-  const pollingIntervalRef = useRef<number | null>(null);
-  
+  const [channels, setChannels] = useState<SimilarChannel[]>([]);
+  const [history, setHistory] = useState<SearchHistory[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
   useEffect(() => {
-    if (!searchId || !isSearching) {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-      return;
+    if (user) {
+      loadHistory();
     }
+  }, [user]);
+
+  const loadHistory = async () => {
+    if (!user) return;
     
-    const fetchVideos = async () => {
-      // Buscar vídeos PRIMEIRO para exibir em tempo real
+    setLoadingHistory(true);
+    try {
       const { data, error } = await supabase
-        .from('related_videos')
-        .select('*')
-        .eq('search_id', searchId)
-        .order('created_at', { ascending: false });
-      
-      if (data) {
-        setVideos(data);
-        setTotalFacelessFound(data.length);
-      }
-      
-      // Buscar status da busca
-      const { data: searchData } = await supabase
-        .from('related_searches')
-        .select('*')
-        .eq('id', searchId)
-        .single();
-      
-      if (searchData) {
-        setCurrentIteration(searchData.current_iteration);
-        setTotalVideosAnalyzed(searchData.total_videos_analyzed);
-        setQuotaUsed(searchData.quota_used);
-        
-        // Verificar se foi parado ou completado
-        if (searchData.status === 'stopped') {
-          setIsSearching(false);
-          toast({
-            title: "⛔ Busca Interrompida",
-            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
-          });
-        } else if (searchData.status === 'quota_exhausted') {
-          setIsSearching(false);
-          toast({
-            title: "🔥 Quota Esgotada",
-            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
-          });
-        } else if (searchData.status === 'completed') {
-          setIsSearching(false);
-          toast({
-            title: "✅ Busca Completa",
-            description: `${searchData.total_faceless_found} vídeos faceless encontrados`,
-          });
-        }
-      }
-    };
-    
-    fetchVideos();
-    pollingIntervalRef.current = window.setInterval(fetchVideos, 1000); // A cada 1 segundo
-    
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
-    };
-  }, [searchId, isSearching]);
-  
-  const handleStartSearch = async () => {
-    if (!searchTerm) {
+        .from("similar_channels_scrapingbee")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      setHistory((data || []).map(item => ({
+        ...item,
+        channels_found: item.channels_found as unknown as SimilarChannel[]
+      })));
+    } catch (error: any) {
+      console.error("Erro ao carregar histórico:", error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!channelUrl.trim()) {
       toast({
-        title: "Termo de busca necessário",
-        description: "Digite um nicho ou palavra-chave para buscar",
-        variant: "destructive",
+        title: "⚠️ URL obrigatória",
+        description: "Insira a URL de um canal do YouTube",
+        variant: "destructive"
       });
       return;
     }
-    
+
+    if (!channelUrl.includes("youtube.com")) {
+      toast({
+        title: "❌ URL inválida",
+        description: "A URL deve ser de um canal do YouTube",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsSearching(true);
-    setVideos([]);
-    setCurrentIteration(0);
-    setTotalFacelessFound(0);
-    setTotalVideosAnalyzed(0);
-    setQuotaUsed(0);
-    
+    setChannels([]);
+
     try {
-      const { data, error } = await supabase.functions.invoke('search-related-darks', {
+      const { data, error } = await supabase.functions.invoke("find-similar-scrapingbee", {
         body: {
-          action: 'start',
-          searchTerm,
-          minDuration,
-          darkDetectionMethod,
-        },
+          channelUrl,
+          searchMethod
+        }
       });
-      
+
       if (error) throw error;
-      
-      setSearchId(data.searchId);
-      
-      toast({
-        title: "🚀 Busca Iniciada",
-        description: "Aguarde enquanto buscamos vídeos faceless...",
-      });
-      
-      // Iniciar automaticamente as iterações
-      setTimeout(() => continueIteration(data.searchId), 3000);
-      
-    } catch (error: any) {
-      console.error('Erro ao iniciar busca:', error);
-      toast({
-        title: "Erro na busca",
-        description: error.message,
-        variant: "destructive",
-      });
-      setIsSearching(false);
-    }
-  };
-  
-  const continueIteration = async (currentSearchId: string) => {
-    if (!isSearching) return;
-    
-    try {
-      // Chamar próxima iteração em background
-      await supabase.functions.invoke('search-related-darks', {
-        body: {
-          action: 'continue',
-          searchId: currentSearchId,
-        },
-      });
-      
-      // Continuar automaticamente
-      setTimeout(() => continueIteration(currentSearchId), 3000);
-      
-    } catch (error: any) {
-      console.error('Erro ao continuar iteração:', error);
-      if (error.message === 'YOUTUBE_QUOTA_EXCEEDED') {
-        toast({
-          title: "🔥 Quota Esgotada",
-          description: `${totalFacelessFound} vídeos encontrados`,
-        });
-        setIsSearching(false);
+
+      if (!data.success) {
+        throw new Error(data.error || "Erro ao buscar canais");
       }
-    }
-  };
-  
-  const handleStopSearch = async () => {
-    if (!searchId) return;
-    
-    try {
-      // Parar IMEDIATAMENTE no frontend
-      setIsSearching(false);
-      
-      // Enviar comando de parada para backend
-      await supabase.functions.invoke('search-related-darks', {
-        body: {
-          action: 'stop',
-          searchId,
-        },
-      });
+
+      setChannels(data.channels || []);
       
       toast({
-        title: "⛔ Busca Interrompida",
-        description: `${totalFacelessFound} vídeos faceless encontrados`,
+        title: "✅ Busca concluída!",
+        description: `${data.total_found} canais similares encontrados. Quota usada: ${data.quota_used}`,
       });
-      
+
+      // Recarregar histórico
+      await loadHistory();
     } catch (error: any) {
-      console.error('Erro ao parar busca:', error);
-      // Garantir que pare localmente mesmo se houver erro
+      console.error("Erro na busca:", error);
+      
+      if (error.message.includes("Configure sua chave ScrapingBee")) {
+        toast({
+          title: "🔑 Chave ScrapingBee necessária",
+          description: (
+            <div>
+              Configure sua chave em{" "}
+              <a href="/configuracoes" className="underline font-semibold">Configurações</a>
+            </div>
+          ),
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "❌ Erro na busca",
+          description: error.message || "Erro desconhecido",
+          variant: "destructive"
+        });
+      }
+    } finally {
       setIsSearching(false);
+    }
+  };
+
+  const loadSearchResults = (search: SearchHistory) => {
+    setChannels(search.channels_found);
+    setChannelUrl(search.target_channel_url);
+    toast({
+      title: "📂 Busca carregada",
+      description: `${search.channels_found.length} canais de ${new Date(search.created_at).toLocaleDateString()}`
+    });
+  };
+
+  const deleteSearch = async (searchId: string) => {
+    try {
+      const { error } = await supabase
+        .from("similar_channels_scrapingbee")
+        .delete()
+        .eq("id", searchId);
+
+      if (error) throw error;
+
+      toast({ title: "🗑️ Busca removida" });
+      await loadHistory();
+    } catch (error: any) {
       toast({
-        title: "⛔ Busca Interrompida",
-        description: `${totalFacelessFound} vídeos encontrados`,
+        title: "Erro ao remover",
+        description: error.message,
+        variant: "destructive"
       });
     }
   };
-  
+
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="container mx-auto p-4 sm:p-6 space-y-6 max-w-7xl">
+      {/* Header */}
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold">🔗 Canais Similares (ScrapingBee)</h1>
+        <p className="text-muted-foreground">
+          Encontre canais similares usando web scraping inteligente via ScrapingBee
+        </p>
+      </div>
+
+      {/* Card de Busca */}
       <Card>
         <CardHeader>
-          <CardTitle>🔗 Busca ILIMITADA de Canais Faceless</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Sistema busca o MÁXIMO de vídeos possível sem limites. 
-            Continua até você parar, quota esgotar ou não encontrar mais canais faceless.
-          </p>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            Nova Busca
+          </CardTitle>
+          <CardDescription>
+            Insira a URL de um canal do YouTube e escolha o método de busca
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <Label>Nicho ou Palavra-chave</Label>
+          <div className="space-y-2">
+            <Label htmlFor="channel-url">URL do Canal</Label>
             <Input
-              placeholder="Ex: WW2 Tales, True Crime, Ancient History"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              id="channel-url"
+              type="url"
+              placeholder="https://youtube.com/@channelhandle"
+              value={channelUrl}
+              onChange={(e) => setChannelUrl(e.target.value)}
               disabled={isSearching}
             />
           </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label>Duração Mínima</Label>
-              <Select
-                value={minDuration.toString()}
-                onValueChange={(v) => setMinDuration(parseInt(v))}
-                disabled={isSearching}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="300">5 minutos</SelectItem>
-                  <SelectItem value="600">10 minutos</SelectItem>
-                  <SelectItem value="1200">20 minutos (recomendado para darks)</SelectItem>
-                  <SelectItem value="1800">30 minutos</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                💡 Canais darks de qualidade geralmente têm vídeos de 20-60 minutos
-              </p>
-            </div>
-            
-            <div>
-              <Label>Meta Mínima de Vídeos</Label>
-              <Select
-                value={minTargetVideos.toString()}
-                onValueChange={(v) => setMinTargetVideos(parseInt(v))}
-                disabled={isSearching}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="100">100 vídeos</SelectItem>
-                  <SelectItem value="300">300 vídeos</SelectItem>
-                  <SelectItem value="500">500 vídeos (padrão)</SelectItem>
-                  <SelectItem value="1000">1000 vídeos</SelectItem>
-                  <SelectItem value="2000">2000 vídeos</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                ⚠️ Não é um limite! Sistema continua após atingir a meta.
-              </p>
-            </div>
-          </div>
-          
-          <div>
-            <Label>Método de Detecção Faceless</Label>
-            <Select
-              value={darkDetectionMethod}
-              onValueChange={setDarkDetectionMethod}
-              disabled={isSearching}
-            >
-              <SelectTrigger>
+
+          <div className="space-y-2">
+            <Label htmlFor="search-method">Método de Busca</Label>
+            <Select value={searchMethod} onValueChange={setSearchMethod} disabled={isSearching}>
+              <SelectTrigger id="search-method">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="gpt-4o-vision">
-                  🤖 GPT-4o Vision (Analisa Thumbnail - Mais Preciso)
-                </SelectItem>
-                <SelectItem value="lovable-ai">
-                  ⚡ Lovable AI (Análise de Texto)
-                </SelectItem>
-                <SelectItem value="keywords-only">
-                  📝 Keywords (Mais Rápido, Menos Preciso)
-                </SelectItem>
+                <SelectItem value="featured">🎯 Canais em Destaque</SelectItem>
+                <SelectItem value="related-videos">📹 Vídeos Relacionados</SelectItem>
+                <SelectItem value="keywords">🔤 Por Keywords</SelectItem>
+                <SelectItem value="hybrid">⚡ Híbrido (Recomendado)</SelectItem>
               </SelectContent>
             </Select>
-            
-            {darkDetectionMethod === 'gpt-4o-vision' && (
-              <div className="mt-2 p-3 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg">
-                <p className="text-sm text-blue-900 dark:text-blue-100">
-                  <strong>✅ GPT-4o Vision</strong> - Analisa a THUMBNAIL do vídeo para detectar se o criador aparece.
-                  <br />
-                  📊 Precisão: 90-95% | 💰 Custo: ~$0.15/1000 análises | 💾 Cache de 90 dias
-                </p>
-              </div>
-            )}
-            
-            {darkDetectionMethod === 'lovable-ai' && (
-              <div className="mt-2 p-3 bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg">
-                <p className="text-sm text-purple-900 dark:text-purple-100">
-                  <strong>⚡ Lovable AI</strong> - Analisa título, descrição e nome do canal (texto apenas).
-                  <br />
-                  📊 Precisão: 70-80% | 💰 Requer créditos Lovable
-                </p>
-              </div>
-            )}
-            
-            {darkDetectionMethod === 'keywords-only' && (
-              <div className="mt-2 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
-                <p className="text-sm text-green-900 dark:text-green-100">
-                  <strong>📝 Keywords</strong> - Detecção rápida por palavras-chave (WW2, documentário, etc).
-                  <br />
-                  📊 Precisão: 60-70% | 💰 Grátis
-                </p>
-              </div>
-            )}
-          </div>
-          
-          <div className="flex gap-2">
-            {!isSearching ? (
-              <Button
-                onClick={handleStartSearch}
-                disabled={!searchTerm}
-                size="lg"
-                className="flex-1"
-              >
-                <Search className="mr-2 h-4 w-4" />
-                🚀 Iniciar Busca ILIMITADA
-              </Button>
-            ) : (
-              <Button
-                onClick={handleStopSearch}
-                variant="destructive"
-                size="lg"
-                className="flex-1"
-              >
-                <StopCircle className="mr-2 h-4 w-4" />
-                ❌ PARAR BUSCA
-              </Button>
-            )}
-          </div>
-          
-          <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-            <p className="text-sm text-yellow-800 dark:text-yellow-200">
-              ⚠️ <strong>Busca sem limites:</strong> O sistema continuará buscando vídeos até você clicar em "❌ PARAR BUSCA", 
-              a quota de todas as API keys esgotar, ou não encontrar mais canais faceless. 
-              Pode resultar em 500, 1000, 2000+ vídeos dependendo do nicho.
+            <p className="text-xs text-muted-foreground">
+              {searchMethod === "featured" && "Extrai canais da seção 'Canais em Destaque'"}
+              {searchMethod === "related-videos" && "Analisa canais de vídeos relacionados"}
+              {searchMethod === "keywords" && "Busca por keywords comuns"}
+              {searchMethod === "hybrid" && "Combina todos os métodos para melhor resultado"}
             </p>
           </div>
+
+          <Alert>
+            <Info className="h-4 w-4" />
+            <AlertDescription>
+              <strong>💡 Chave ScrapingBee necessária:</strong>{" "}
+              Configure em{" "}
+              <a href="/configuracoes" className="underline font-semibold">
+                Configurações
+              </a>{" "}
+              antes de usar esta ferramenta.
+            </AlertDescription>
+          </Alert>
+
+          <Button 
+            onClick={handleSearch} 
+            disabled={isSearching || !channelUrl.trim()} 
+            size="lg" 
+            className="w-full"
+          >
+            {isSearching ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Buscando canais similares...
+              </>
+            ) : (
+              <>
+                <Search className="mr-2 h-4 w-4" />
+                Buscar Canais Similares
+              </>
+            )}
+          </Button>
         </CardContent>
       </Card>
-      
-      {isSearching && (
+
+      {/* Resultados */}
+      {channels.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>⚙️ Buscando: "{searchTerm}"</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Sistema em busca ILIMITADA. Clique em "❌ PARAR BUSCA" para interromper.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-4">
-              <Loader2 className="h-6 w-6 animate-spin" />
-              <div className="flex-1">
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Iteração {currentIteration}</span>
-                  <span>{totalFacelessFound} vídeos faceless encontrados</span>
-                </div>
-                <Progress 
-                  value={Math.min(100, (totalFacelessFound / minTargetVideos) * 100)} 
-                  className="animate-pulse" 
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {totalFacelessFound >= minTargetVideos 
-                    ? `✅ Meta de ${minTargetVideos} atingida! Continuando busca...`
-                    : `Meta mínima: ${minTargetVideos} vídeos (${Math.round((totalFacelessFound / minTargetVideos) * 100)}%)`
-                  }
-                </p>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="text-center p-3 bg-background rounded-lg border">
-                <div className="text-2xl font-bold text-primary">{totalVideosAnalyzed}</div>
-                <div className="text-xs text-muted-foreground">Vídeos Analisados</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-lg border">
-                <div className="text-2xl font-bold text-green-600">{totalFacelessFound}</div>
-                <div className="text-xs text-muted-foreground">Canais Faceless ✅</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-lg border">
-                <div className="text-2xl font-bold text-red-600">{totalVideosAnalyzed - totalFacelessFound}</div>
-                <div className="text-xs text-muted-foreground">Rejeitados ❌</div>
-              </div>
-              <div className="text-center p-3 bg-background rounded-lg border">
-                <div className="text-2xl font-bold text-purple-600">
-                  {totalVideosAnalyzed > 0 ? Math.round((totalFacelessFound / totalVideosAnalyzed) * 100) : 0}%
-                </div>
-                <div className="text-xs text-muted-foreground">Taxa de Aceitação</div>
-              </div>
-            </div>
-            
-            <div className="text-xs text-center text-muted-foreground">
-              Quota Usada: <span className="font-bold">{quotaUsed.toLocaleString()}</span> unidades
-            </div>
-            
-            {totalVideosAnalyzed > 50 && totalFacelessFound > 0 && (totalFacelessFound / totalVideosAnalyzed) < 0.05 && (
-              <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-300 dark:border-yellow-800 rounded-lg p-3">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  ⚠️ <strong>Taxa de aceitação baixa ({Math.round((totalFacelessFound / totalVideosAnalyzed) * 100)}%)!</strong><br/>
-                  Tente: Reduzir duração mínima para 5min ou buscar termo mais específico como "WW2 documentary" ou "True Crime narrated"
-                </p>
-              </div>
-            )}
-            
-            <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                🔄 <strong>Iteração {currentIteration}:</strong> Buscando relacionados e filtrando canais faceless...
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-      
-      {videos.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              ✅ {videos.length} Vídeos Faceless Encontrados
-              {isSearching && <Badge variant="outline" className="ml-2 animate-pulse">🔄 Atualizando...</Badge>}
-              {!isSearching && videos.length >= minTargetVideos && (
-                <Badge variant="default" className="ml-2">🎉 Meta atingida!</Badge>
-              )}
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Canais sem pessoas reais (narração + imagens, vídeos de arquivo, animações)
-            </p>
+            <CardTitle>✅ {channels.length} Canais Similares Encontrados</CardTitle>
+            <CardDescription>
+              Ordenados por score de similaridade (mais relevantes primeiro)
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {videos.map((video) => (
-                <Card key={video.id} className="overflow-hidden">
-                  <img
-                    src={video.thumbnail_url}
-                    alt={video.title}
-                    className="w-full h-40 object-cover"
-                  />
-                  <CardContent className="p-4 space-y-2">
-                    <h3 className="font-semibold line-clamp-2 text-sm">
-                      {video.title}
-                    </h3>
-                    
+              {channels.map((channel) => (
+                <Card key={channel.id} className="overflow-hidden hover:shadow-lg transition-shadow">
+                  <div className="aspect-video relative bg-muted">
+                    <img
+                      src={channel.thumbnail}
+                      alt={channel.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = "https://via.placeholder.com/320x180?text=Canal";
+                      }}
+                    />
+                  </div>
+                  <CardContent className="p-4 space-y-3">
+                    <div>
+                      <h3 className="font-bold text-lg line-clamp-2" title={channel.name}>
+                        {channel.name}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">@{channel.handle}</p>
+                    </div>
+
                     <div className="flex items-center gap-2">
-                      <Badge variant="default">Dark: {video.dark_score}</Badge>
-                      {video.iteration > 0 && (
-                        <Badge variant="outline">Iter: {video.iteration}</Badge>
-                      )}
+                      <Badge variant="secondary" className="text-xs">
+                        {channel.subscribers} inscritos
+                      </Badge>
+                      <Badge variant="outline" className="text-xs">
+                        {Math.round(channel.similarity_score * 100)}% similar
+                      </Badge>
                     </div>
-                    
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <img
-                        src={video.channel_thumbnail}
-                        alt={video.channel_title}
-                        className="w-6 h-6 rounded-full"
-                      />
-                      <span className="line-clamp-1">{video.channel_title}</span>
-                    </div>
-                    
-                    <div className="text-sm text-muted-foreground space-y-1">
-                      <div>👥 {video.subscriber_count.toLocaleString()} inscritos</div>
-                      <div>👁️ {video.view_count.toLocaleString()} views</div>
-                      <div>📅 Canal: {video.channel_age_days} dias</div>
-                      <div>⚡ VPH: {video.vph.toLocaleString()}</div>
-                      <div>📊 Ratio: {video.view_sub_ratio.toFixed(1)}x</div>
-                    </div>
-                    
+
+                    {channel.description && (
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {channel.description}
+                      </p>
+                    )}
+
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-full"
-                      onClick={() =>
-                        window.open(
-                          `https://youtube.com/watch?v=${video.youtube_video_id}`,
-                          '_blank'
-                        )
-                      }
+                      onClick={() => window.open(channel.url, "_blank")}
                     >
                       <ExternalLink className="mr-2 h-3 w-3" />
-                      Ver no YouTube
+                      Visitar Canal
                     </Button>
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Histórico */}
+      {history.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Histórico de Buscas
+            </CardTitle>
+            <CardDescription>
+              Suas últimas 10 buscas realizadas
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {history.map((search) => (
+                <div
+                  key={search.id}
+                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-semibold">{search.target_channel_name}</h4>
+                      <Badge variant="outline" className="text-xs">
+                        {search.search_method}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {search.channels_found.length} canais • {" "}
+                      {new Date(search.created_at).toLocaleString("pt-BR")} • {" "}
+                      Quota: {search.quota_used}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => loadSearchResults(search)}
+                    >
+                      Ver Resultados
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteSearch(search.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Estado vazio */}
+      {!loadingHistory && history.length === 0 && channels.length === 0 && (
+        <Card>
+          <CardContent className="py-12 text-center space-y-4">
+            <div className="text-6xl">🔍</div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold">Nenhuma busca realizada ainda</h3>
+              <p className="text-sm text-muted-foreground max-w-md mx-auto">
+                Insira a URL de um canal do YouTube acima e clique em "Buscar Canais Similares" 
+                para encontrar canais relacionados usando ScrapingBee.
+              </p>
             </div>
           </CardContent>
         </Card>

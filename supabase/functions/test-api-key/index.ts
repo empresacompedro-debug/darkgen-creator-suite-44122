@@ -131,6 +131,23 @@ serve(async (req) => {
         break;
       }
 
+      case 'scrapingbee': {
+        const testUrl = `https://app.scrapingbee.com/api/v1/?api_key=${apiKey}&url=https://www.google.com&render_js=false`;
+        const response = await fetch(testUrl);
+        
+        if (response.status === 401 || response.status === 403) {
+          valid = false;
+          message = 'Chave ScrapingBee inválida ou não autorizada';
+        } else if (!response.ok) {
+          valid = false;
+          message = `Erro ao validar chave ScrapingBee (${response.status})`;
+        } else {
+          valid = true;
+          message = 'Chave ScrapingBee válida e funcionando!';
+        }
+        break;
+      }
+
       default:
         throw new Error(`Provider "${provider}" não suportado`);
     }

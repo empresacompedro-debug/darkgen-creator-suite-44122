@@ -1178,6 +1178,45 @@ export type Database = {
         }
         Relationships: []
       }
+      similar_channels_scrapingbee: {
+        Row: {
+          channels_found: Json
+          created_at: string | null
+          id: string
+          quota_used: number | null
+          search_method: string
+          target_channel_id: string
+          target_channel_name: string | null
+          target_channel_thumbnail: string | null
+          target_channel_url: string
+          user_id: string
+        }
+        Insert: {
+          channels_found?: Json
+          created_at?: string | null
+          id?: string
+          quota_used?: number | null
+          search_method: string
+          target_channel_id: string
+          target_channel_name?: string | null
+          target_channel_thumbnail?: string | null
+          target_channel_url: string
+          user_id: string
+        }
+        Update: {
+          channels_found?: Json
+          created_at?: string | null
+          id?: string
+          quota_used?: number | null
+          search_method?: string
+          target_channel_id?: string
+          target_channel_name?: string | null
+          target_channel_thumbnail?: string | null
+          target_channel_url?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       srt_conversions: {
         Row: {
           created_at: string
