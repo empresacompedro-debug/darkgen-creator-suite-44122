@@ -41,3 +41,6 @@ verify_jwt = true
 
 [functions.check-subscription-status]
 verify_jwt = true
+
+[functions.find-similar-scrapingbee]
+verify_jwt = true
