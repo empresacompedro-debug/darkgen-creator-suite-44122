@@ -1178,6 +1178,57 @@ export type Database = {
         }
         Relationships: []
       }
+      similar_channels_progress: {
+        Row: {
+          channels_collected: Json
+          completed_at: string | null
+          error_message: string | null
+          featured_done: boolean | null
+          id: string
+          keywords_done: boolean | null
+          quota_used: number | null
+          related_done: boolean | null
+          search_method: string
+          started_at: string | null
+          status: string
+          target_channel_url: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          channels_collected?: Json
+          completed_at?: string | null
+          error_message?: string | null
+          featured_done?: boolean | null
+          id?: string
+          keywords_done?: boolean | null
+          quota_used?: number | null
+          related_done?: boolean | null
+          search_method: string
+          started_at?: string | null
+          status?: string
+          target_channel_url: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          channels_collected?: Json
+          completed_at?: string | null
+          error_message?: string | null
+          featured_done?: boolean | null
+          id?: string
+          keywords_done?: boolean | null
+          quota_used?: number | null
+          related_done?: boolean | null
+          search_method?: string
+          started_at?: string | null
+          status?: string
+          target_channel_url?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       similar_channels_scrapingbee: {
         Row: {
           channels_found: Json
