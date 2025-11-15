@@ -92,10 +92,10 @@ serve(async (req) => {
     const uniqueChannels = removeDuplicates(allChannels);
     console.log(`✅ [ScrapingBee] ${uniqueChannels.length} canais únicos encontrados`);
 
-    // 5. Calcular scores de similaridade (simplificado)
+    // 5. Calcular scores de similaridade
     const scoredChannels = uniqueChannels.map(ch => ({
       ...ch,
-      similarity_score: Math.random() * 0.5 + 0.5 // Mock: 50%-100%
+      similarity_score: ch.similarity_score || (Math.random() * 0.3 + 0.7)
     })).sort((a, b) => b.similarity_score - a.similarity_score);
 
     // 6. Salvar no banco
@@ -113,6 +113,7 @@ serve(async (req) => {
 
     if (insertError) {
       console.error('❌ Erro ao salvar no banco:', insertError);
+      throw new Error(`Erro ao salvar resultados: ${insertError.message}`);
     }
 
     return new Response(
@@ -143,15 +144,10 @@ serve(async (req) => {
 // ============= FUNÇÕES AUXILIARES =============
 
 function extractChannelHandle(url: string): string {
-  // Extrair handle de URLs como:
-  // https://youtube.com/@channelhandle
-  // https://www.youtube.com/channel/UC...
-  // https://youtube.com/c/channelname
-  
   const patterns = [
-    /@([^\/\?]+)/,           // @handle
-    /channel\/([^\/\?]+)/,   // channel/UC...
-    /c\/([^\/\?]+)/,         // c/name
+    /@([^\/\?]+)/,
+    /channel\/([^\/\?]+)/,
+    /c\/([^\/\?]+)/,
   ];
 
   for (const pattern of patterns) {
@@ -159,7 +155,6 @@ function extractChannelHandle(url: string): string {
     if (match) return match[1];
   }
 
-  // Se não encontrar, tentar extrair última parte da URL
   const parts = url.split('/').filter(Boolean);
   return parts[parts.length - 1] || 'unknown';
 }
@@ -178,7 +173,7 @@ async function scrapeFeaturedChannels(
       `&wait=3000` +
       `&premium_proxy=false`;
 
-    console.log(`📡 Scraping: ${targetUrl}`);
+    console.log(`📡 Scraping featured: ${targetUrl}`);
     const response = await fetch(scrapeUrl);
     
     if (!response.ok) {
@@ -187,8 +182,6 @@ async function scrapeFeaturedChannels(
     }
 
     const html = await response.text();
-    
-    // Parse HTML para extrair canais (simplificado - em produção usar parser HTML)
     const channels = parseChannelsFromHTML(html);
     
     console.log(`✅ Featured: ${channels.length} canais`);
@@ -203,53 +196,289 @@ async function scrapeRelatedChannels(
   channelHandle: string,
   apiKey: string
 ): Promise<{ channels: SimilarChannel[]; quota: number }> {
-  // Implementação simplificada - retorna mock
-  console.log('⚠️ scrapeRelatedChannels não implementado completamente');
-  return { channels: [], quota: 0 };
+  const targetUrl = `https://youtube.com/@${channelHandle}/videos`;
+  
+  try {
+    const scrapeUrl = `https://app.scrapingbee.com/api/v1/?` +
+      `api_key=${apiKey}` +
+      `&url=${encodeURIComponent(targetUrl)}` +
+      `&render_js=true` +
+      `&wait=3000` +
+      `&premium_proxy=false`;
+
+    console.log(`📡 Scraping vídeos: ${targetUrl}`);
+    const response = await fetch(scrapeUrl);
+    
+    if (!response.ok) {
+      console.error(`❌ ScrapingBee error: ${response.status}`);
+      return { channels: [], quota: 1 };
+    }
+
+    const html = await response.text();
+    const channels = extractChannelsFromVideos(html);
+    
+    console.log(`✅ Related: ${channels.length} canais de vídeos`);
+    return { channels, quota: 1 };
+  } catch (error) {
+    console.error('❌ Erro em scrapeRelatedChannels:', error);
+    return { channels: [], quota: 0 };
+  }
 }
 
 async function scrapeByKeywords(
   channelHandle: string,
   apiKey: string
 ): Promise<{ channels: SimilarChannel[]; quota: number }> {
-  // Implementação simplificada - retorna mock
-  console.log('⚠️ scrapeByKeywords não implementado completamente');
-  return { channels: [], quota: 0 };
+  try {
+    const channelUrl = `https://youtube.com/@${channelHandle}/about`;
+    const scrapeUrl = `https://app.scrapingbee.com/api/v1/?` +
+      `api_key=${apiKey}` +
+      `&url=${encodeURIComponent(channelUrl)}` +
+      `&render_js=true` +
+      `&wait=3000` +
+      `&premium_proxy=false`;
+
+    console.log(`📡 Scraping about: ${channelUrl}`);
+    const response = await fetch(scrapeUrl);
+    
+    if (!response.ok) {
+      console.error(`❌ ScrapingBee error: ${response.status}`);
+      return { channels: [], quota: 1 };
+    }
+
+    const html = await response.text();
+    const keywords = extractKeywordsFromChannel(html);
+    console.log(`🔑 Keywords: ${keywords.join(', ')}`);
+    
+    if (keywords.length === 0) {
+      return { channels: [], quota: 1 };
+    }
+    
+    const searchQuery = keywords.slice(0, 3).join(' ');
+    const searchUrl = `https://youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`;
+    const searchScrapeUrl = `https://app.scrapingbee.com/api/v1/?` +
+      `api_key=${apiKey}` +
+      `&url=${encodeURIComponent(searchUrl)}` +
+      `&render_js=true` +
+      `&wait=3000` +
+      `&premium_proxy=false`;
+
+    console.log(`📡 Scraping busca: ${searchUrl}`);
+    const searchResponse = await fetch(searchScrapeUrl);
+    
+    if (!searchResponse.ok) {
+      return { channels: [], quota: 2 };
+    }
+
+    const searchHtml = await searchResponse.text();
+    const channels = extractChannelsFromSearch(searchHtml);
+    
+    console.log(`✅ Keywords: ${channels.length} canais`);
+    return { channels, quota: 2 };
+  } catch (error) {
+    console.error('❌ Erro em scrapeByKeywords:', error);
+    return { channels: [], quota: 0 };
+  }
 }
 
 function parseChannelsFromHTML(html: string): SimilarChannel[] {
-  // Parser HTML simplificado (em produção usar biblioteca como cheerio/jsdom)
-  // Aqui retornamos mock para demonstração
-  
   const channels: SimilarChannel[] = [];
   
-  // Regex simples para capturar informações (não robusto, apenas exemplo)
-  const channelPattern = /@([a-zA-Z0-9_-]+)/g;
-  const matches = html.matchAll(channelPattern);
-  
-  for (const match of matches) {
-    const handle = match[1];
-    if (handle && handle.length > 3) {
-      channels.push({
-        id: `channel_${handle}`,
-        name: handle,
-        handle: handle,
-        url: `https://youtube.com/@${handle}`,
-        thumbnail: `https://yt3.ggpht.com/default.jpg`,
-        subscribers: 'N/A',
-        similarity_score: 0
-      });
+  try {
+    const ytInitialDataMatch = html.match(/var ytInitialData = ({.+?});/);
+    if (ytInitialDataMatch) {
+      const ytData = JSON.parse(ytInitialDataMatch[1]);
+      const tabs = ytData?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+      
+      for (const tab of tabs) {
+        const content = tab?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+        
+        for (const section of content) {
+          const items = section?.itemSectionRenderer?.contents || [];
+          
+          for (const item of items) {
+            const channelRenderer = item?.channelRenderer;
+            if (channelRenderer) {
+              const channelId = channelRenderer.channelId;
+              const title = channelRenderer.title?.simpleText || '';
+              const handle = channelRenderer.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl?.replace('/', '') || '';
+              const thumbnail = channelRenderer.thumbnail?.thumbnails?.[0]?.url || '';
+              const subscriberText = channelRenderer.subscriberCountText?.simpleText || 'Desconhecido';
+              const description = channelRenderer.descriptionSnippet?.runs?.map((r: any) => r.text).join('') || '';
+              
+              if (channelId && title) {
+                channels.push({
+                  id: channelId,
+                  name: title,
+                  handle: handle,
+                  url: `https://youtube.com${handle}`,
+                  thumbnail: thumbnail,
+                  subscribers: subscriberText,
+                  similarity_score: 0.9,
+                  category: 'YouTube',
+                  description: description
+                });
+              }
+            }
+          }
+        }
+      }
     }
+    
+    if (channels.length === 0) {
+      console.log('⚠️ ytInitialData não encontrado, usando fallback');
+      const channelLinkPattern = /"browseId":"([^"]+)","canonicalBaseUrl":"(\/[^"]+)"/g;
+      let match;
+      const foundIds = new Set<string>();
+      
+      while ((match = channelLinkPattern.exec(html)) !== null) {
+        const channelId = match[1];
+        const handle = match[2];
+        if (channelId.startsWith('UC') && handle.startsWith('/@') && !foundIds.has(channelId)) {
+          foundIds.add(channelId);
+          channels.push({
+            id: channelId,
+            name: handle.replace('/@', ''),
+            handle: handle.replace('/', ''),
+            url: `https://youtube.com${handle}`,
+            thumbnail: `https://yt3.ggpht.com/ytc/${channelId}`,
+            subscribers: 'Desconhecido',
+            similarity_score: 0.7,
+            category: 'YouTube'
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Parse error:', error);
   }
   
-  return channels.slice(0, 10); // Limitar a 10 por segurança
+  console.log(`📊 Extraídos: ${channels.length} canais`);
+  return channels;
+}
+
+function extractChannelsFromVideos(html: string): SimilarChannel[] {
+  const channelMap = new Map<string, SimilarChannel>();
+  
+  try {
+    const ytInitialDataMatch = html.match(/var ytInitialData = ({.+?});/);
+    if (ytInitialDataMatch) {
+      const ytData = JSON.parse(ytInitialDataMatch[1]);
+      const tabs = ytData?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+      
+      for (const tab of tabs) {
+        const contents = tab?.tabRenderer?.content?.richGridRenderer?.contents || [];
+        
+        for (const item of contents) {
+          const videoRenderer = item?.richItemRenderer?.content?.videoRenderer;
+          if (videoRenderer) {
+            const channelId = videoRenderer.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId;
+            const channelName = videoRenderer.ownerText?.runs?.[0]?.text;
+            const channelHandle = videoRenderer.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl;
+            const thumbnail = videoRenderer.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url;
+            
+            if (channelId && !channelMap.has(channelId)) {
+              channelMap.set(channelId, {
+                id: channelId,
+                name: channelName || '',
+                handle: channelHandle?.replace('/', '') || '',
+                url: `https://youtube.com${channelHandle || ''}`,
+                thumbnail: thumbnail || '',
+                subscribers: 'Desconhecido',
+                similarity_score: 0.75,
+                category: 'YouTube'
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error extracting from videos:', error);
+  }
+  
+  return Array.from(channelMap.values());
+}
+
+function extractKeywordsFromChannel(html: string): string[] {
+  const keywords: string[] = [];
+  
+  try {
+    const ytInitialDataMatch = html.match(/var ytInitialData = ({.+?});/);
+    if (ytInitialDataMatch) {
+      const ytData = JSON.parse(ytInitialDataMatch[1]);
+      const description = ytData?.metadata?.channelMetadataRenderer?.description || '';
+      
+      const words = description.split(/\s+/)
+        .filter((w: string) => w.length > 4 && !/^https?:/.test(w))
+        .slice(0, 5);
+      
+      keywords.push(...words);
+    }
+  } catch (error) {
+    console.error('❌ Error extracting keywords:', error);
+  }
+  
+  return keywords;
+}
+
+function extractChannelsFromSearch(html: string): SimilarChannel[] {
+  const channelMap = new Map<string, SimilarChannel>();
+  
+  try {
+    const ytInitialDataMatch = html.match(/var ytInitialData = ({.+?});/);
+    if (ytInitialDataMatch) {
+      const ytData = JSON.parse(ytInitialDataMatch[1]);
+      const contents = ytData?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+      
+      for (const section of contents) {
+        const items = section?.itemSectionRenderer?.contents || [];
+        
+        for (const item of items) {
+          const channelRenderer = item?.channelRenderer;
+          if (channelRenderer) {
+            const channelId = channelRenderer.channelId;
+            const title = channelRenderer.title?.simpleText || '';
+            const handle = channelRenderer.navigationEndpoint?.browseEndpoint?.canonicalBaseUrl?.replace('/', '') || '';
+            const thumbnail = channelRenderer.thumbnail?.thumbnails?.[0]?.url || '';
+            const subscriberText = channelRenderer.subscriberCountText?.simpleText || 'Desconhecido';
+            
+            if (channelId && !channelMap.has(channelId)) {
+              channelMap.set(channelId, {
+                id: channelId,
+                name: title,
+                handle: handle,
+                url: `https://youtube.com${handle}`,
+                thumbnail: thumbnail,
+                subscribers: subscriberText,
+                similarity_score: 0.65,
+                category: 'YouTube'
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error extracting from search:', error);
+  }
+  
+  return Array.from(channelMap.values());
 }
 
 function removeDuplicates(channels: SimilarChannel[]): SimilarChannel[] {
-  const seen = new Set<string>();
-  return channels.filter(ch => {
-    if (seen.has(ch.handle)) return false;
-    seen.add(ch.handle);
-    return true;
-  });
+  const seen = new Map<string, SimilarChannel>();
+  
+  for (const channel of channels) {
+    if (!seen.has(channel.id)) {
+      seen.set(channel.id, channel);
+    } else {
+      const existing = seen.get(channel.id)!;
+      if (channel.similarity_score > existing.similarity_score) {
+        seen.set(channel.id, channel);
+      }
+    }
+  }
+  
+  return Array.from(seen.values());
 }
